@@ -170,11 +170,18 @@ export function errorForResponse(input: {
     return new ChatlyConflictError(args);
   }
   /*
-   * 400 as well as 422. Nothing in this API answers 422 — `ValidationError`
-   * is `httpStatus: 400, code: validation_failed` and the exception filter
-   * maps a raw `ZodError` the same way — so a client that mapped 422 alone
-   * put every real validation failure in the generic branch. The Java SDK
-   * shipped exactly that.
+   * 400 AND 422, because they are different failures and both happen.
+   *
+   * A malformed body is 400: `ValidationError` is
+   * `httpStatus: 400, code: validation_failed`, and the exception filter maps
+   * a raw `ZodError` the same way. A client that mapped 422 alone therefore
+   * put the commonest error in its generic branch — the Java SDK shipped
+   * exactly that.
+   *
+   * 422 is a macro action the server could not run: `macro-action-runner.ts`
+   * throws it naming the action and its index, for a row referencing an
+   * action removed from the registry or one that failed mid-run. Both macro
+   * write routes take an API key, so an SDK caller can see it.
    */
   if (input.status === 400 || input.status === 422) {
     return new ChatlyValidationError(args);

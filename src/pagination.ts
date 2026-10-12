@@ -50,6 +50,32 @@ export async function* autoPaginate<T>(fetchPage: PageFetcher<T>): AsyncGenerato
   }
 }
 
+/**
+ * The two shapes for a paginated route whose path takes parameters.
+ *
+ * `listable` builds them from a fixed path; this builds them from a function
+ * that produces the path, which is what `contacts.journey` and
+ * `conversations.messages` need.
+ */
+export function listableAt<T>(
+  transport: Transport,
+  path: (args: string) => string,
+  extra: Query = {},
+): {
+  page: (id: string, query?: PageQuery & Query) => Promise<Page<T>>;
+  all: (id: string, query?: Query) => AsyncGenerator<T, void, void>;
+} {
+  const page = (id: string, query: PageQuery & Query = {}): Promise<Page<T>> =>
+    transport.get<Page<T>>(path(id), { ...extra, ...query });
+  return {
+    page,
+    all: (id: string, query: Query = {}) =>
+      autoPaginate<T>((cursor) =>
+        page(id, { ...query, ...(cursor === undefined ? {} : { cursor }) }),
+      ),
+  };
+}
+
 /** Build a list namespace's two shapes — one page, and every page — from one path. */
 export function listable<T>(
   transport: Transport,

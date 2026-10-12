@@ -14,7 +14,7 @@ import {
 export const DEFAULT_API_URL = 'https://api.chatlychat.com';
 
 /** The package version, stamped into `User-Agent` so our logs can see SDK age. */
-export const SDK_VERSION = '0.2.2';
+export const SDK_VERSION = '0.3.0';
 
 export interface RetryPolicy {
   /** Total attempts, including the first. `1` disables retrying. */

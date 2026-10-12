@@ -1,4 +1,4 @@
-import { listable, type Page, type PageQuery } from './pagination.js';
+import { autoPaginate, listable, listableAt, type Page, type PageQuery } from './pagination.js';
 
 import type { Query, Transport } from './transport.js';
 
@@ -105,6 +105,10 @@ export interface EventListQuery extends PageQuery {
 export type Unmodelled = Record<string, unknown>;
 
 export function contactsResource(t: Transport) {
+  const journeyPages = listableAt<Unmodelled>(
+    t,
+    (id) => `/v1/contacts/${encodeURIComponent(id)}/journey`,
+  );
   return {
     ...listable<Unmodelled>(t, '/v1/contacts'),
     get: (id: string) => t.get<Unmodelled>(`/v1/contacts/${encodeURIComponent(id)}`),
@@ -134,13 +138,24 @@ export function contactsResource(t: Transport) {
      */
     unsubscribe: (id: string, body: UnsubscribeContactInput) =>
       t.post<Unmodelled>(`/v1/contacts/${encodeURIComponent(id)}/unsubscribe`, body),
-    /** The contact's timeline: conversations, events, tickets, in one ordered read. */
-    journey: (id: string, query: Query = {}) =>
-      t.get<Unmodelled>(`/v1/contacts/${encodeURIComponent(id)}/journey`, query),
+    /**
+     * The contact's timeline: conversations, events and tickets, in one
+     * ordered read. Cursor-paginated — `journeyAll` walks it.
+     *
+     * The cursor here is an ISO-8601 instant rather than an opaque string,
+     * which is why the shared manifest failed to flag this route as paged for
+     * a day. It is still a cursor: walk it, never construct one.
+     */
+    journey: journeyPages.page,
+    journeyAll: journeyPages.all,
   };
 }
 
 export function conversationsResource(t: Transport) {
+  const messagePages = listableAt<Unmodelled>(
+    t,
+    (id) => `/v1/conversations/${encodeURIComponent(id)}/messages`,
+  );
   return {
     ...listable<Unmodelled>(t, '/v1/conversations'),
     get: (id: string) => t.get<Unmodelled>(`/v1/conversations/${encodeURIComponent(id)}`),
@@ -152,18 +167,28 @@ export function conversationsResource(t: Transport) {
      * decide" against the SDK had to hand-roll the request while the same
      * capability sat behind a tool call.
      */
-    messages: (conversationId: string, query: PageQuery & Query = {}) =>
-      t.get<Page<Unmodelled>>(
-        `/v1/conversations/${encodeURIComponent(conversationId)}/messages`,
-        query,
-      ),
+    messages: messagePages.page,
+    /**
+     * Every message in the thread, oldest cursor first.
+     *
+     * This was missing: the route is cursor-paginated and the manifest flags
+     * it, and nothing connected that flag to this SDK until a test read the
+     * manifest and asked.
+     */
+    messagesAll: messagePages.all,
     send: (body: MessageInput) =>
       t.post<Unmodelled>(
         `/v1/conversations/${encodeURIComponent(body.conversationId)}/messages`,
         body,
       ),
-    /** Open conversations with no agent reply yet — the queue a bot or a rota works from. */
-    unattended: (query: Query = {}) => t.get<Unmodelled>('/v1/conversations/unattended', query),
+    /**
+     * Open conversations with no agent reply yet — the queue a bot or a rota
+     * works from. Cursor-paginated; `unattendedAll` walks it.
+     */
+    ...(() => {
+      const p = listable<Unmodelled>(t, '/v1/conversations/unattended');
+      return { unattended: p.list, unattendedAll: p.listAll };
+    })(),
     /** Is a human or a bot driving this thread right now. */
     agentHandling: (id: string) =>
       t.get<Unmodelled>(`/v1/conversations/${encodeURIComponent(id)}/agent-handling`),
@@ -236,8 +261,24 @@ export function kbResource(t: Transport) {
 
 export function searchResource(t: Transport) {
   return {
-    /** Full-text across contacts, conversations, messages, tickets and the KB. */
-    query: (q: string, opts: Query = {}) => t.get<Unmodelled>('/v1/search', { q, ...opts }),
+    /**
+     * Full-text across contacts, conversations, messages, tickets and the KB.
+     *
+     * Returns the WHOLE envelope, not just `items`: the response carries
+     * `facets` and a `tier` beside them, and a caller that only ever saw hits
+     * would lose both. `queryAll` walks the cursor and yields hits alone,
+     * which is the right trade for a loop.
+     */
+    query: (q: string, opts: PageQuery & Query = {}) =>
+      t.get<Page<Unmodelled> & Unmodelled>('/v1/search', { q, ...opts }),
+    queryAll: (q: string, opts: Query = {}) =>
+      autoPaginate<Unmodelled>((cursor) =>
+        t.get<Page<Unmodelled>>('/v1/search', {
+          q,
+          ...opts,
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+      ),
     /**
      * Help-centre articles only.
      *

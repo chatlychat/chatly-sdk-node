@@ -479,3 +479,65 @@ describe('SDK_VERSION', () => {
     expect(SDK_VERSION).toBe(version);
   });
 });
+
+/* ── Auto-pagination covers every paged route, and only those ─────────── */
+describe('the paged set matches the manifest', () => {
+  /*
+   * The manifest's `paged` flag was wrong in BOTH directions for a day:
+   * `macros.list` was flagged and is `@PaginationExempt`, while
+   * `contacts.journey`, `conversations.unattended` and `search.query` return
+   * real cursors and were not flagged. Eight became ten. Nothing connected
+   * the flag to this SDK's paginators, which is how that went unnoticed — so
+   * this reads the manifest and checks both directions.
+   */
+  it('every paged entry has an auto-paginating form here, and no other does', async () => {
+    const { readFileSync } = await import('node:fs');
+    const manifest = JSON.parse(
+      readFileSync(new URL('../../sdk-spec/surface.json', import.meta.url), 'utf8'),
+    ) as { entries: Array<{ ns: string; name: string; paged?: boolean }> };
+
+    const paged = manifest.entries.filter((e) => e.paged === true);
+    /*
+     * Floor, with the reason in the message. Ten today. It moved 8 → 10 on
+     * evidence; if it drops, check that the manifest still parses before
+     * concluding a route legitimately stopped paginating.
+     */
+    expect(
+      paged.length,
+      'the paged set shrank — confirm surface.json parsed first',
+    ).toBeGreaterThanOrEqual(10);
+
+    const { chatly } = client([{ status: 200, body: '{"items":[],"nextCursor":null}' }]);
+    const bag = chatly as unknown as Record<string, Record<string, unknown>>;
+
+    /** The paginating method this SDK exposes for a manifest entry. */
+    const walkerFor: Record<string, [string, string]> = {
+      'contacts.list': ['contacts', 'listAll'],
+      'contacts.journey': ['contacts', 'journeyAll'],
+      'conversations.list': ['conversations', 'listAll'],
+      'conversations.messages': ['conversations', 'messagesAll'],
+      'conversations.unattended': ['conversations', 'unattendedAll'],
+      'tickets.list': ['tickets', 'listAll'],
+      'kb.articles': ['kb', 'listAll'],
+      'search.query': ['search', 'queryAll'],
+      'events.list': ['events', 'listAll'],
+      'webhooks.deliveries': ['webhooks', 'listAll'],
+    };
+
+    for (const entry of paged) {
+      const key = `${entry.ns}.${entry.name}`;
+      const target = walkerFor[key];
+      expect(target, `${key} is flagged paged and has no walker in this SDK`).toBeDefined();
+      const [ns, method] = target ?? ['', ''];
+      expect(typeof bag[ns]?.[method], `chatly.${ns}.${method} is missing`).toBe('function');
+    }
+
+    // And nothing walks a route the manifest does not flag. `macros` is the
+    // one that mattered: a paginator there raised a decode error on the real
+    // bare-array response in two sibling SDKs.
+    expect(
+      bag['macros']?.['listAll'],
+      'macros does not paginate — the route is exempt',
+    ).toBeUndefined();
+  });
+});

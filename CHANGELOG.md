@@ -1,5 +1,38 @@
 # @chatlychat/sdk-node
 
+## 0.3.0
+
+Three routes paginate that this SDK was treating as single reads, and one that
+it was paginating does not paginate at all. The shared manifest's `paged` flag
+was wrong in both directions and is now right in both.
+
+### Added
+
+- **`contacts.journeyAll()`, `conversations.unattendedAll()`,
+  `conversations.messagesAll()` and `search.queryAll()`.** All four routes
+  answer `{ items, nextCursor }` and only `messages` had a single-page form
+  that admitted it. `journey`'s cursor is an ISO-8601 instant rather than an
+  opaque string, which is why the manifest did not flag it — walk it, never
+  construct one.
+- `messagesAll` in particular had been missing since the surface was written:
+  `conversations.messages` was flagged `paged` the whole time and nothing
+  connected the flag to the paginators. A test that reads the manifest and
+  asserts both directions — every flagged route has a walker, and nothing
+  else does — found it in one run, and now guards it.
+
+### Changed
+
+- **`search.query()` returns the whole envelope**, not just the hits. The
+  response carries `facets` and a `tier` beside `items`, and a caller who only
+  ever saw hits lost both. `queryAll()` yields hits alone, which is the right
+  trade inside a loop.
+- `contacts.journey()` and `conversations.unattended()` now return `Page<T>`,
+  matching what the routes actually send.
+- `macros.list()` returns a bare array and `macros.listAll()` is gone — see
+  0.2.2. Two sibling SDKs built a paginator over that route; one of them read
+  the bare array as an _empty page_ and returned it with a 200, which is worse
+  than an error.
+
 ## 0.2.2
 
 Two route facts that 0.2.1 had wrong. Both are breaking for the two methods
