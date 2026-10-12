@@ -54,9 +54,9 @@ function manifestPath(): string {
   return candidates.find((p) => existsSync(p)) ?? candidates[0] ?? '';
 }
 
-const MANIFEST: { entries: ManifestEntry[] } = JSON.parse(
-  readFileSync(manifestPath(), 'utf8'),
-) as { entries: ManifestEntry[] };
+const MANIFEST: { entries: ManifestEntry[] } = JSON.parse(readFileSync(manifestPath(), 'utf8')) as {
+  entries: ManifestEntry[];
+};
 
 /** Throwaway values, distinctive enough to find again in the recorded path. */
 const ARG = {
@@ -84,10 +84,14 @@ function invocations(chatly: ChatlyClient): Array<{ key: string; call: () => Pro
     { key: 'contacts.list', call: () => chatly.contacts.list() },
     { key: 'contacts.get', call: () => chatly.contacts.get(ARG.id) },
     { key: 'contacts.upsert', call: () => chatly.contacts.upsert({ email: 'a@b.test' }) },
-    { key: 'contacts.bulk_upsert', call: () => chatly.contacts.bulkUpsert([{ email: 'a@b.test' }]) },
+    {
+      key: 'contacts.bulk_upsert',
+      call: () => chatly.contacts.bulkUpsert([{ email: 'a@b.test' }]),
+    },
     {
       key: 'contacts.merge',
-      call: () => chatly.contacts.merge(ARG.id, { mergedId: '0192b0de-0000-7000-8000-000000000001' }),
+      call: () =>
+        chatly.contacts.merge(ARG.id, { mergedId: '0192b0de-0000-7000-8000-000000000001' }),
     },
     { key: 'contacts.add_tags', call: () => chatly.contacts.addTags(ARG.id, ARG.tag) },
     { key: 'contacts.remove_tag', call: () => chatly.contacts.removeTag(ARG.id, ARG.tag) },
@@ -122,7 +126,10 @@ function invocations(chatly: ChatlyClient): Array<{ key: string; call: () => Pro
     {
       key: 'conversations.schedule_message',
       call: () =>
-        chatly.conversations.scheduleMessage(ARG.id, { body: 'later', sendAt: '2030-01-01T00:00:00Z' }),
+        chatly.conversations.scheduleMessage(ARG.id, {
+          body: 'later',
+          sendAt: '2030-01-01T00:00:00Z',
+        }),
     },
     {
       key: 'conversations.cancel_scheduled',
@@ -131,7 +138,10 @@ function invocations(chatly: ChatlyClient): Array<{ key: string; call: () => Pro
 
     { key: 'tickets.list', call: () => chatly.tickets.list() },
     { key: 'tickets.comments', call: () => chatly.tickets.comments(ARG.id) },
-    { key: 'tickets.for_conversation', call: () => chatly.tickets.forConversation(ARG.conversationId) },
+    {
+      key: 'tickets.for_conversation',
+      call: () => chatly.tickets.forConversation(ARG.conversationId),
+    },
     { key: 'tickets.queues', call: () => chatly.tickets.queues() },
     { key: 'tickets.merge', call: () => chatly.tickets.merge(ARG.id, { loserId: 't2' }) },
     { key: 'tickets.split', call: () => chatly.tickets.split(ARG.id, {}) },
@@ -246,7 +256,10 @@ describe('surface lock', () => {
       expect(entry, `no manifest entry for ${key}`).toBeDefined();
       recorded.length = 0;
       await call();
-      expect(recorded, `${key} issued ${String(recorded.length)} requests, expected 1`).toHaveLength(1);
+      expect(
+        recorded,
+        `${key} issued ${String(recorded.length)} requests, expected 1`,
+      ).toHaveLength(1);
       const got = recorded[0];
       const [ns, name] = key.split('.');
       entries.push({
@@ -257,7 +270,9 @@ describe('surface lock', () => {
       });
     }
 
-    entries.sort((a, b) => (a.ns === b.ns ? a.name.localeCompare(b.name) : a.ns.localeCompare(b.ns)));
+    entries.sort((a, b) =>
+      a.ns === b.ns ? a.name.localeCompare(b.name) : a.ns.localeCompare(b.ns),
+    );
     const expected = [...MANIFEST.entries]
       .map((e) => ({ ns: e.ns, name: e.name, http: e.http, path: e.path }))
       .sort((a, b) => (a.ns === b.ns ? a.name.localeCompare(b.name) : a.ns.localeCompare(b.ns)));

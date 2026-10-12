@@ -34,7 +34,6 @@ function recordingFetch() {
   return { calls, fn: fn as unknown as typeof fetch };
 }
 
-
 /**
  * Local copy of `@livechat/shared/narrow`'s `at`, deliberately not imported.
  *

@@ -14,7 +14,7 @@ import {
 export const DEFAULT_API_URL = 'https://api.chatlychat.com';
 
 /** The package version, stamped into `User-Agent` so our logs can see SDK age. */
-export const SDK_VERSION = '0.2.1';
+export const SDK_VERSION = '0.2.2';
 
 export interface RetryPolicy {
   /** Total attempts, including the first. `1` disables retrying. */
@@ -91,7 +91,12 @@ export class Transport {
 
   /** A copy of this transport with a pinned idempotency key. */
   public withPinnedKey(key: string): Transport {
-    const clone: Transport = Object.create(Transport.prototype);
+    // `Object.create` is typed `any`, so the cast is doing the work the
+    // annotation only looked like it was doing. Prototype-cloning rather than
+    // re-running the constructor is deliberate: the constructor re-applies
+    // defaulting, and a derived transport must inherit the parent's resolved
+    // base URL and fetch, not re-derive them.
+    const clone = Object.create(Transport.prototype) as Transport;
     Object.assign(clone, this, { pinnedIdempotencyKey: key });
     return clone;
   }
@@ -139,7 +144,7 @@ export class Transport {
         // Repeated keys stay repeated: `kinds=kb&kinds=ticket`. Joining them
         // with a comma produces one parameter whose value is not a member of
         // the enum — which is what the MCP server's `search` tool did.
-        for (const item of value) {
+        for (const item of value as ReadonlyArray<string>) {
           url.searchParams.append(key, item);
         }
       } else {
@@ -173,7 +178,10 @@ export class Transport {
         }
         const advised =
           err instanceof ChatlyApiError && err.retryAfter !== null ? err.retryAfter * 1000 : null;
-        const backoff = Math.min(this.retry.baseDelayMs * 2 ** (attempt - 1), this.retry.maxDelayMs);
+        const backoff = Math.min(
+          this.retry.baseDelayMs * 2 ** (attempt - 1),
+          this.retry.maxDelayMs,
+        );
         // Jitter: a fleet of workers retrying in lockstep is a second outage.
         const jittered = backoff * (0.5 + Math.random() / 2);
         await this.sleepFn(advised ?? jittered);

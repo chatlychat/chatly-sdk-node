@@ -157,13 +157,34 @@ export function errorForResponse(input: {
     retryAfter: input.retryAfter,
   };
 
-  if (input.status === 401) return new ChatlyAuthenticationError(args);
-  if (input.status === 403) return new ChatlyPermissionError(args);
-  if (input.status === 404) return new ChatlyNotFoundError(args);
-  if (input.status === 409) return new ChatlyConflictError(args);
-  if (input.status === 400 || input.status === 422) return new ChatlyValidationError(args);
-  if (input.status === 429) return new ChatlyRateLimitError(args);
-  if (input.status >= 500) return new ChatlyServerError(args);
+  if (input.status === 401) {
+    return new ChatlyAuthenticationError(args);
+  }
+  if (input.status === 403) {
+    return new ChatlyPermissionError(args);
+  }
+  if (input.status === 404) {
+    return new ChatlyNotFoundError(args);
+  }
+  if (input.status === 409) {
+    return new ChatlyConflictError(args);
+  }
+  /*
+   * 400 as well as 422. Nothing in this API answers 422 — `ValidationError`
+   * is `httpStatus: 400, code: validation_failed` and the exception filter
+   * maps a raw `ZodError` the same way — so a client that mapped 422 alone
+   * put every real validation failure in the generic branch. The Java SDK
+   * shipped exactly that.
+   */
+  if (input.status === 400 || input.status === 422) {
+    return new ChatlyValidationError(args);
+  }
+  if (input.status === 429) {
+    return new ChatlyRateLimitError(args);
+  }
+  if (input.status >= 500) {
+    return new ChatlyServerError(args);
+  }
   return new ChatlyApiError(args);
 }
 

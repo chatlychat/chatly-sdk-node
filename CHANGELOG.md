@@ -1,5 +1,26 @@
 # @chatlychat/sdk-node
 
+## 0.2.2
+
+Two route facts that 0.2.1 had wrong. Both are breaking for the two methods
+involved, and both were methods that could not work as shipped.
+
+### Fixed
+
+- **`billing.usage()` could never succeed.** `GET /v1/billing/usage` reports
+  ONE meter over a window and validates `eventType` against a closed list
+  before doing anything else, so a call with no query is a 400 — not a
+  summary of everything. The signature is now
+  `usage(eventType, { from, to })`. Four of the eight Chatly SDKs shipped it
+  as optional and one sent no query at all.
+- **`macros.list()` is not paginated.** The shared manifest marked it
+  `paged`, and the handler is `@PaginationExempt`: it answers a bare array,
+  capped at 200 and ordered by usage rank. `macros.listAll()` is gone, and
+  `list()` returns the array. Two sibling SDKs built a paginator over it and
+  raised a decode error on the real response — with green test suites, because
+  a fake transport that answers every route with a page envelope agrees with
+  the mistake.
+
 ## 0.2.1
 
 Identical to 0.2.0 in content. npm left 0.2.0 in a **staged** state — a

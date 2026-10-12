@@ -170,10 +170,9 @@ describe('contract 4 — typed errors', () => {
   }
 
   it('populates retryAfter on a 429 from the Retry-After header', async () => {
-    const { chatly } = client(
-      [{ status: 429, body: '{}', headers: { 'retry-after': '7' } }],
-      { retry: { attempts: 1 } },
-    );
+    const { chatly } = client([{ status: 429, body: '{}', headers: { 'retry-after': '7' } }], {
+      retry: { attempts: 1 },
+    });
     await expect(chatly.contacts.list()).rejects.toMatchObject({ retryAfter: 7 });
   });
 
@@ -304,9 +303,9 @@ describe('contract 7 — webhook signature, against the pinned vector', () => {
       expect(() =>
         verifyWebhookSignature({ body: BODY, signatureHeader: header, secret: SECRET }),
       ).not.toThrow();
-      expect(
-        verifyWebhookSignature({ body: BODY, signatureHeader: header, secret: SECRET }),
-      ).toBe(false);
+      expect(verifyWebhookSignature({ body: BODY, signatureHeader: header, secret: SECRET })).toBe(
+        false,
+      );
     }
   });
 });
