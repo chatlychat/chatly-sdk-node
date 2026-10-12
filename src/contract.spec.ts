@@ -491,10 +491,25 @@ describe('the paged set matches the manifest', () => {
    * this reads the manifest and checks both directions.
    */
   it('every paged entry has an auto-paginating form here, and no other does', async () => {
-    const { readFileSync } = await import('node:fs');
-    const manifest = JSON.parse(
-      readFileSync(new URL('../../sdk-spec/surface.json', import.meta.url), 'utf8'),
-    ) as { entries: Array<{ ns: string; name: string; paged?: boolean }> };
+    const { existsSync, readFileSync } = await import('node:fs');
+    /*
+     * Monorepo, then the copy a public mirror vendors at its root.
+     *
+     * This hardcoded `../../sdk-spec/surface.json`, which is right here and
+     * does not exist in a mirror, where the package root IS the repo root.
+     * `surface-lock.spec.ts` already resolved both and this did not, so the
+     * mirror's CI went red on a test that passes locally — exactly what that
+     * CI is for.
+     */
+    const candidates = [
+      new URL('../../sdk-spec/surface.json', import.meta.url),
+      new URL('../sdk-spec/surface.json', import.meta.url),
+    ];
+    const found = candidates.find((u) => existsSync(u));
+    expect(found, 'surface.json is not reachable from either known location').toBeDefined();
+    const manifest = JSON.parse(readFileSync(found ?? candidates[0]!, 'utf8')) as {
+      entries: Array<{ ns: string; name: string; paged?: boolean }>;
+    };
 
     const paged = manifest.entries.filter((e) => e.paged === true);
     /*
