@@ -1,9 +1,9 @@
 {
   "name": "@chatlychat/sdk-node",
-  "version": "0.1.0",
-  "description": "Server-side SDK for the LiveChat platform — REST client + webhook signature verification.",
+  "version": "0.2.1",
+  "description": "Official Node.js SDK for the Chatly API — typed REST client, webhook signature verification, and the widget identity hash.",
   "license": "MIT",
-  "homepage": "https://chatlychat.com/docs",
+  "homepage": "https://github.com/chatlychat/chatly-sdk-node#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chatlychat/chatly-sdk-node.git"
@@ -12,7 +12,7 @@
     "url": "https://github.com/chatlychat/chatly-sdk-node/issues"
   },
   "keywords": [
-    "livechat",
+    "chatly",
     "chat",
     "messaging",
     "support",
@@ -20,7 +20,7 @@
     "sdk",
     "server"
   ],
-  "author": "LiveChat Platform Engineering",
+  "author": "Chatly",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

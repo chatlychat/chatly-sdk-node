@@ -1,0 +1,8 @@
+src
+tsconfig.json
+tsconfig.tsbuildinfo
+node_modules
+.turbo
+eslint.config.js
+*.test.ts
+*.spec.ts
