@@ -164,7 +164,7 @@ function invocations(chatly: ChatlyClient): Array<{ key: string; call: () => Pro
     { key: 'channels.get', call: () => chatly.channels.get(ARG.id) },
 
     { key: 'billing.plans', call: () => chatly.billing.plans() },
-    { key: 'billing.usage', call: () => chatly.billing.usage() },
+    { key: 'billing.usage', call: () => chatly.billing.usage('ai_tokens') },
 
     { key: 'workspace.settings', call: () => chatly.workspace.settings() },
     { key: 'workspace.labels', call: () => chatly.workspace.labels() },

@@ -205,7 +205,18 @@ export function ticketsResource(t: Transport) {
 
 export function macrosResource(t: Transport) {
   return {
-    ...listable<Unmodelled>(t, '/v1/macros'),
+    /**
+     * The macro library. NOT cursor-paginated.
+     *
+     * The handler carries `@PaginationExempt` and answers with a bare array,
+     * capped at 200 and ordered by usage rank — so there is no `nextCursor`
+     * and no `listAll`. The shared manifest said `paged: true` for a day and
+     * two SDKs built a paginator over it; both raised a decode error on the
+     * real response while their test suites stayed green, because a fake
+     * transport that answers every route with a page envelope agrees with the
+     * mistake.
+     */
+    list: (query: Query = {}) => t.get<ReadonlyArray<Unmodelled>>('/v1/macros', query),
     create: (body: Unmodelled) => t.post<Unmodelled>('/v1/macros', body),
     update: (id: string, body: Unmodelled) =>
       t.patch<Unmodelled>(`/v1/macros/${encodeURIComponent(id)}`, body),
@@ -293,8 +304,17 @@ export function billingResource(t: Transport) {
   return {
     /** The plan catalogue this deployment can actually sell. */
     plans: () => t.get<Unmodelled>('/v1/billing/plans'),
-    /** Current period usage, including AI spend against the workspace ceiling. */
-    usage: (query: Query = {}) => t.get<Unmodelled>('/v1/billing/usage', query),
+    /**
+     * Usage for ONE meter over a window.
+     *
+     * `eventType` is required — the handler validates it against a closed
+     * list and throws before doing anything else, so a call without it is a
+     * 400, not a summary of everything. Four SDKs shipped this as an
+     * optional argument and one sent no query at all, which made it a method
+     * that could never succeed.
+     */
+    usage: (eventType: string, range: { from?: string; to?: string } = {}) =>
+      t.get<Unmodelled>('/v1/billing/usage', { eventType, ...range }),
   };
 }
 
