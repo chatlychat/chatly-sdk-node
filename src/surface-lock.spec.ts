@@ -31,11 +31,29 @@ import { describe, expect, it } from 'vitest';
 
 import { ChatlyClient } from './index.js';
 
+/**
+ * The top-level shape of a successful response.
+ *
+ * Four values, and every route on the surface is exactly one of them. See
+ * `$shapeMeans` in the manifest for how each was derived from the handler's
+ * `@ZodResponse` schema.
+ */
+type Shape = 'array' | 'page' | 'object' | 'empty';
+
 interface ManifestEntry {
   ns: string;
   name: string;
   http: string;
   path: string;
+  shape?: Shape;
+}
+
+interface LockEntry {
+  ns: string;
+  name: string;
+  http: string;
+  path: string;
+  shape: Shape;
 }
 
 /**
@@ -68,6 +86,142 @@ const ARG = {
   teamId: 'TEAM1',
   contactId: 'CONT1',
 };
+
+/**
+ * The response shape THIS SDK's decoder expects from each route.
+ *
+ * ═══ READ THIS BEFORE CHANGING A VALUE ════════════════════════════════════
+ *
+ * Hand-written, from the handlers — deliberately NOT read from
+ * `surface.json`, even though this file loads that manifest for the path
+ * templates. A fixture derived from the manifest agrees with whatever the
+ * manifest says, including when it is wrong, and that is not a hypothetical:
+ * `macros.list` was marked `paged: true` for a day while its handler is
+ * `@PaginationExempt` and answers a bare array. Two SDKs built paginators
+ * over it and raised a decode error against the real API with green suites,
+ * because their fakes answered every route with `{ items, nextCursor }`.
+ *
+ * So this column is a second opinion. The suite below feeds each method the
+ * shape declared HERE and asserts the value it hands back really has that
+ * shape; `scripts/check-sdk-surface-parity.mjs` then diffs this column — via
+ * `surface.lock.json` — against the manifest's own `shape`, across all eight
+ * backend SDKs. Eight independently written columns have to agree with the
+ * server, so a wrong manifest row needs eight authors to misread one handler.
+ *
+ * Three rows look wrong and are not. `contacts.remove_tag` is a DELETE that
+ * answers with the surviving contact, and `conversations.cancel_scheduled` a
+ * DELETE that answers with the cancelled row; `macros.delete` is the only
+ * real 204 on the surface. Two of the four report routes are bare arrays.
+ */
+const EXPECTED_SHAPE: Readonly<Record<string, Shape>> = {
+  'root.whoami': 'object',
+
+  'contacts.list': 'page',
+  'contacts.get': 'object',
+  'contacts.upsert': 'object',
+  'contacts.bulk_upsert': 'object',
+  'contacts.merge': 'object',
+  'contacts.add_tags': 'object',
+  // A DELETE with a body: the surviving contact, same object as the tag POST.
+  'contacts.remove_tag': 'object',
+  'contacts.unsubscribe': 'object',
+  'contacts.journey': 'page',
+
+  'conversations.list': 'page',
+  'conversations.get': 'object',
+  'conversations.messages': 'page',
+  'conversations.send': 'object',
+  'conversations.unattended': 'page',
+  'conversations.agent_handling': 'object',
+  'conversations.set_agent_handling': 'object',
+  'conversations.generated_replies': 'array',
+  'conversations.generate_reply': 'object',
+  'conversations.scheduled_messages': 'array',
+  'conversations.schedule_message': 'object',
+  // Also a DELETE with a body: the row it just cancelled.
+  'conversations.cancel_scheduled': 'object',
+
+  'tickets.list': 'page',
+  'tickets.comments': 'array',
+  'tickets.for_conversation': 'array',
+  'tickets.queues': 'array',
+  'tickets.merge': 'object',
+  'tickets.split': 'object',
+  'tickets.bulk': 'object',
+
+  // @PaginationExempt, bare array, capped at 200 by usage rank. The one that
+  // cost two SDKs a decode error.
+  'macros.list': 'array',
+  'macros.create': 'object',
+  'macros.update': 'object',
+  // The ONLY 204 here: @HttpCode(204), and the handler returns nothing.
+  'macros.delete': 'empty',
+
+  'kb.articles': 'page',
+  'kb.article': 'object',
+  'kb.collections': 'array',
+
+  'search.query': 'page',
+
+  'events.track': 'object',
+  'events.list': 'page',
+
+  'webhooks.deliveries': 'page',
+  'webhooks.delivery': 'object',
+  'webhooks.redeliver': 'object',
+
+  'reports.overview': 'object',
+  // Arrays, both of them — per-agent rows and per-day buckets, no envelope.
+  'reports.agents': 'array',
+  'reports.conversations_by_day': 'array',
+  'reports.sla': 'object',
+
+  'channels.list': 'array',
+  'channels.get': 'object',
+
+  'billing.plans': 'array',
+  'billing.usage': 'object',
+
+  'workspace.settings': 'object',
+  'workspace.labels': 'array',
+  'workspace.inboxes': 'array',
+  'workspace.team_members': 'array',
+  'workspace.agent_skills': 'object',
+};
+
+/** A success body of one shape, as the API would send it. */
+function responseForShape(shape: Shape): Response {
+  if (shape === 'empty') {
+    // A real 204 has no body at all. A decoder that insists on parsing one
+    // throws here, which is the point of giving this its own value.
+    return new Response(null, { status: 204 });
+  }
+  const body =
+    shape === 'page'
+      ? '{"items":[{"id":"x_1"}],"nextCursor":null}'
+      : shape === 'array'
+        ? '[{"id":"x_1"}]'
+        : '{"id":"x_1"}';
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/** The shape a decoded value actually has, named in the same vocabulary. */
+function actualShape(value: unknown): string {
+  if (value === undefined || value === null) {
+    return 'empty';
+  }
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  if (typeof value !== 'object') {
+    return `scalar(${typeof value})`;
+  }
+  const o = value as Record<string, unknown>;
+  return Array.isArray(o.items) && 'nextCursor' in o ? 'page' : 'object';
+}
 
 /**
  * Every manifest entry, paired with the call that should produce it.
@@ -222,44 +376,94 @@ function templatise(actual: string, template: string): string {
   return out;
 }
 
-describe('surface lock', () => {
-  it('issues exactly the request the manifest describes, for all 55 entries', async () => {
-    const recorded: Array<{ method: string; path: string }> = [];
-    const fetchFn = (async (url: string | URL, init?: RequestInit) => {
-      recorded.push({
-        method: init?.method ?? 'GET',
-        path: new URL(String(url)).pathname,
-      });
-      return new Response('{"items":[],"nextCursor":null}', {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as unknown as typeof fetch;
-
-    const chatly = new ChatlyClient({
-      apiKey: 'ck_surface_lock',
-      apiUrl: 'https://api.test.invalid',
-      fetchFn,
-      retry: { attempts: 1 },
-      sleepFn: async () => undefined,
+/** A client whose transport answers every call from `respond`. */
+function clientAnswering(
+  respond: () => Response,
+  recorded: Array<{ method: string; path: string }>,
+): ChatlyClient {
+  const fetchFn = (async (url: string | URL, init?: RequestInit) => {
+    recorded.push({
+      method: init?.method ?? 'GET',
+      path: new URL(String(url)).pathname,
     });
+    return respond();
+  }) as unknown as typeof fetch;
 
+  return new ChatlyClient({
+    apiKey: 'ck_surface_lock',
+    apiUrl: 'https://api.test.invalid',
+    fetchFn,
+    retry: { attempts: 1 },
+    sleepFn: async () => undefined,
+  });
+}
+
+describe('surface lock', () => {
+  it('declares a response shape for every entry, and all four shapes appear', () => {
+    const calls = invocations(clientAnswering(() => responseForShape('object'), []));
+    for (const { key } of calls) {
+      expect(EXPECTED_SHAPE[key], `${key} has no declared response shape`).toBeDefined();
+    }
+    expect(Object.keys(EXPECTED_SHAPE).sort()).toEqual(calls.map((c) => c.key).sort());
+
+    /*
+     * Anti-vacuity. A column that said `object` 55 times would satisfy every
+     * other assertion in this file and would still be worthless, so the
+     * distribution is asserted. The numbers come from reading all 55
+     * `@ZodResponse` schemas on 2026-10-12: 14 array, 10 page, 30 object,
+     * 1 empty. If the surface grows these change — but all four must stay
+     * represented, and `empty` must stay at exactly one until a second 204
+     * genuinely ships.
+     */
+    const counts = { array: 0, page: 0, object: 0, empty: 0 };
+    for (const shape of Object.values(EXPECTED_SHAPE)) {
+      counts[shape]++;
+    }
+    expect(counts).toEqual({ array: 14, page: 10, object: 30, empty: 1 });
+  });
+
+  it('issues exactly the request the manifest describes, for all 55 entries', async () => {
     const byKey = new Map(MANIFEST.entries.map((e) => [`${e.ns}.${e.name}`, e]));
-    const calls = invocations(chatly);
 
     // Every manifest entry has an invocation, and no invocation is orphaned.
-    expect(new Set(calls.map((c) => c.key))).toEqual(new Set(byKey.keys()));
+    const keys = invocations(clientAnswering(() => responseForShape('object'), [])).map(
+      (c) => c.key,
+    );
+    expect(new Set(keys)).toEqual(new Set(byKey.keys()));
 
-    const entries: ManifestEntry[] = [];
-    for (const { key, call } of calls) {
+    const entries: LockEntry[] = [];
+    for (const key of keys) {
       const entry = byKey.get(key);
       expect(entry, `no manifest entry for ${key}`).toBeDefined();
-      recorded.length = 0;
-      await call();
+      const shape = EXPECTED_SHAPE[key] as Shape;
+
+      /*
+       * One client per route, answering with the shape THIS file declares —
+       * not a single fake answering everything with a page envelope, which is
+       * how `macros.list` passed here and failed in production.
+       */
+      const recorded: Array<{ method: string; path: string }> = [];
+      const chatly = clientAnswering(() => responseForShape(shape), recorded);
+      const call = invocations(chatly).find((c) => c.key === key);
+      expect(call, `invocation for ${key} vanished`).toBeDefined();
+
+      const value = await (call as { call: () => Promise<unknown> }).call();
+
       expect(
         recorded,
         `${key} issued ${String(recorded.length)} requests, expected 1`,
       ).toHaveLength(1);
+
+      /*
+       * And the value handed back really has the declared shape.
+       *
+       * This is what catches a method that wraps or unwraps: a `list` that
+       * returned `page.items` from a `page` route, or one that reached for
+       * `.items` on a bare-array route, disagrees here even though the
+       * request it issued was perfect.
+       */
+      expect(actualShape(value), `${key} decoded to the declared ${shape}`).toBe(shape);
+
       const got = recorded[0];
       const [ns, name] = key.split('.');
       entries.push({
@@ -267,6 +471,7 @@ describe('surface lock', () => {
         name: name ?? '',
         http: got?.method ?? '',
         path: templatise(got?.path ?? '', entry?.path ?? ''),
+        shape,
       });
     }
 
@@ -274,7 +479,7 @@ describe('surface lock', () => {
       a.ns === b.ns ? a.name.localeCompare(b.name) : a.ns.localeCompare(b.ns),
     );
     const expected = [...MANIFEST.entries]
-      .map((e) => ({ ns: e.ns, name: e.name, http: e.http, path: e.path }))
+      .map((e) => ({ ns: e.ns, name: e.name, http: e.http, path: e.path, shape: e.shape }))
       .sort((a, b) => (a.ns === b.ns ? a.name.localeCompare(b.name) : a.ns.localeCompare(b.ns)));
 
     expect(entries).toEqual(expected);
@@ -287,5 +492,56 @@ describe('surface lock', () => {
         2,
       )}\n`,
     );
+  });
+
+  /**
+   * The negative direction: a paginator fed the WRONG shape must fail loudly.
+   *
+   * The positive test above proves each method copes with the shape this file
+   * says the route sends. It cannot prove the declaration matters — a decoder
+   * that ignores the body entirely passes it. This one feeds every
+   * auto-paginator a bare array where it expects `{ items, nextCursor }` and
+   * requires it to reject, which is exactly the failure the real API handed
+   * the .NET and Rust clients on `macros.list`.
+   *
+   * It is also why `macros.list` has no `listAll` in this SDK. There is no
+   * cursor on that route, so a walker over it could only return one page and
+   * look complete.
+   */
+  it('every auto-paginator rejects a bare array where a page is expected', async () => {
+    const recorded: Array<{ method: string; path: string }> = [];
+    const chatly = clientAnswering(() => responseForShape('array'), recorded);
+    const walkers: Record<string, () => AsyncIterable<unknown>> = {
+      'contacts.list': () => chatly.contacts.listAll(),
+      'contacts.journey': () => chatly.contacts.journeyAll('c_1'),
+      'conversations.list': () => chatly.conversations.listAll(),
+      'conversations.messages': () => chatly.conversations.messagesAll('k_1'),
+      'conversations.unattended': () => chatly.conversations.unattendedAll(),
+      'tickets.list': () => chatly.tickets.listAll(),
+      'kb.articles': () => chatly.kb.listAll(),
+      'search.query': () => chatly.search.queryAll('refunds'),
+      'events.list': () => chatly.events.listAll(),
+      'webhooks.deliveries': () => chatly.webhooks.listAll(),
+    };
+
+    // One walker per `page` route, and nothing else — the floor that stops
+    // this test quietly shrinking to nothing.
+    const pageRoutes = Object.entries(EXPECTED_SHAPE)
+      .filter(([, shape]) => shape === 'page')
+      .map(([key]) => key);
+    expect(Object.keys(walkers).sort()).toEqual([...pageRoutes].sort());
+    expect(pageRoutes).toHaveLength(10);
+
+    for (const [key, walk] of Object.entries(walkers)) {
+      let threw = false;
+      try {
+        for await (const _ of walk()) {
+          break;
+        }
+      } catch {
+        threw = true;
+      }
+      expect(threw, `${key}'s paginator accepted a bare array as a page`).toBe(true);
+    }
   });
 });

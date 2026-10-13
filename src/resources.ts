@@ -205,8 +205,19 @@ export function conversationsResource(t: Transport) {
       t.get<Unmodelled>(`/v1/conversations/${encodeURIComponent(id)}/scheduled-messages`, query),
     scheduleMessage: (id: string, body: ScheduleMessageInput) =>
       t.post<Unmodelled>(`/v1/conversations/${encodeURIComponent(id)}/scheduled-messages`, body),
+    /**
+     * Cancel a pending send.
+     *
+     * Typed as returning the cancelled row, NOT `void`. This route reads like
+     * a delete and is not one: the handler carries
+     * `@ZodResponse(scheduledMessageSchema)` and answers 200 with the row it
+     * just cancelled, so a caller can show what it called off. Declaring
+     * `void` meant the body was parsed and then thrown away by the type —
+     * reachable only by casting. `macros.delete` is the only real 204 on this
+     * surface.
+     */
     cancelScheduled: (scheduledId: string) =>
-      t.del<void>(`/v1/conversations/scheduled-messages/${encodeURIComponent(scheduledId)}`),
+      t.del<Unmodelled>(`/v1/conversations/scheduled-messages/${encodeURIComponent(scheduledId)}`),
   };
 }
 

@@ -1,11 +1,14 @@
 /**
  * The cross-language contract, tested in Node.
  *
- * `packages/sdk-spec/CONTRACT.md` §10 lists nine things every Chatly SDK must
- * prove. This file is Node's proof. The same nine run in Python, Go, Ruby,
- * PHP, Java, .NET and Rust, against the same two pinned vectors — so a digest
- * that differs between languages is a bug in one of them, not a difference of
- * opinion.
+ * `packages/sdk-spec/CONTRACT.md` §10 lists ten things every Chatly SDK must
+ * prove. This file is Node's proof of items 1–9. The same nine run in Python,
+ * Go, Ruby, PHP, Java, .NET and Rust, against the same two pinned vectors —
+ * so a digest that differs between languages is a bug in one of them, not a
+ * difference of opinion.
+ *
+ * Item 10, the response-shape lock, lives in `surface-lock.spec.ts` instead,
+ * because it is the file that writes `surface.lock.json`.
  */
 import { describe, expect, it } from 'vitest';
 
