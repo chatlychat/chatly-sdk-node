@@ -26,6 +26,15 @@ export interface VerifyWebhookSignatureInput {
 /**
  * Verify the signature header on a webhook delivery from the platform.
  *
+ * **Prefer {@link verifyChatlySignature}.** This function handles exactly one
+ * of the seven things Chatly signs — the `x-livechat-signature` event webhook
+ * — and it takes the header VALUE, so a caller holding a request has to know
+ * which header to pull out and has no way to be told they picked the wrong
+ * one. `verifyChatlySignature` takes the whole header bag plus the surface
+ * name, covers all seven constructions, and returns a reason rather than a
+ * bare `false`. This one stays exported and unchanged because it is published
+ * and in use; it is not deprecated and it is not going away.
+ *
  * `v1` is HMAC-SHA256 over `` `${t}.${body}` `` — the timestamp is bound INTO
  * the digest, which is what makes the replay window enforceable at all.
  *

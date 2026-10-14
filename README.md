@@ -73,7 +73,69 @@ duplicate work:
 await chatly.withIdempotencyKey('order-4471-refund').contacts.upsert({ … });
 ```
 
-## Verifying webhooks
+## Verifying anything Chatly signs
+
+`verifyChatlySignature` is the one to use. You tell it which **surface** you
+are terminating, hand it the raw body and the request's headers, and it checks
+the construction that surface actually uses:
+
+```ts
+import { verifyChatlySignature } from '@chatlychat/sdk-node';
+
+const result = verifyChatlySignature({
+  surface: 'event_webhook',
+  body: rawBody, // the EXACT bytes, before JSON.parse
+  headers: req.headers,
+  secret: process.env.CHATLY_WEBHOOK_SECRET!,
+});
+
+if (!result.ok) {
+  console.warn('rejected', result.reason, result.message);
+  return res.status(400).end();
+}
+```
+
+Pass the raw body — re-serialising parsed JSON reorders keys and changes
+whitespace, so the digest will not match. On a refusal, `reason` is a stable
+string to branch on (`signature_mismatch`, `timestamp_outside_tolerance`,
+`missing_signature_header`, …) and `message` is a sentence written to be
+printed. It never throws.
+
+### The seven surfaces
+
+| `surface`                 | Header(s)                                                      | Signed string                   | `t` unit         |
+| ------------------------- | -------------------------------------------------------------- | ------------------------------- | ---------------- |
+| `agent_delivery`          | `x-chatly-signature: t=…,v1=…`                                 | `<t>.<rawBody>`                 | seconds          |
+| `event_webhook`           | `x-livechat-signature: t=…,v1=…`                               | `<t>.<rawBody>`                 | seconds          |
+| `ai_tool_call`            | `x-chatly-signature: t=…,v1=…`                                 | `<t>.<METHOD>.<path>.<rawBody>` | seconds          |
+| `canvas_step`             | `x-chatly-canvas-signature: sha256=…` and `x-chatly-canvas-ts` | `<ts>.<rawBody>`                | **milliseconds** |
+| `customer_card`           | `x-chatly-signature: sha256=…` and `x-chatly-timestamp`        | `<ts>.<rawBody>`                | **milliseconds** |
+| `workflow_webhook`        | `x-chatly-signature-v2: t=…,v1=…`                              | `<t>.<rawBody>`                 | seconds          |
+| `workflow_webhook_legacy` | `x-chatly-signature: sha256=…`                                 | `<rawBody>` — no timestamp      | n/a              |
+
+Three of them send **`x-chatly-signature`** and sign three different strings,
+which is why `surface` is required rather than inferred from the header: a
+verifier that keys on the header name can be pointed at the wrong
+construction while looking completely correct.
+
+`ai_tool_call` additionally needs `method` and `path` (`pathname + search`,
+never the host), because both are inside the signed string. `toleranceSeconds`
+defaults to 300 and is always in **seconds**, whatever unit the surface's
+timestamp uses — the conversion is this function's job, and getting it wrong
+by hand puts the freshness check about 54,000 years out and rejects
+everything.
+
+**Prefer `workflow_webhook` over `workflow_webhook_legacy`.** Every workflow
+webhook call sends both headers. The legacy one signs the body with no
+timestamp, so a captured request verifies forever and nothing can bound a
+replay; `verifyChatlySignature` refuses it unless you pass
+`allowUnprotectedReplay: true`, and if you do, make the endpoint idempotent.
+
+### `verifyWebhookSignature` (still supported)
+
+The original single-scheme verifier. It handles `event_webhook` only and takes
+the header value rather than the header bag. It is published, in use, and not
+going away:
 
 ```ts
 import { verifyWebhookSignature } from '@chatlychat/sdk-node';
@@ -84,9 +146,6 @@ const ok = verifyWebhookSignature({
   secret: process.env.CHATLY_WEBHOOK_SECRET!,
 });
 ```
-
-Pass the raw body — re-serialising parsed JSON reorders keys and changes
-whitespace, so the digest will not match.
 
 The scheme is `t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256 over
 `` `${t}.${body}` ``. The timestamp is inside the signed string, so a captured

@@ -1,5 +1,54 @@
 # @chatlychat/sdk-node
 
+## 0.4.0 — 2026-10-14
+
+### Added
+
+- **`verifyChatlySignature` — one verifier for all seven things Chatly
+  signs.** `verifyWebhookSignature` handles exactly one of them, the
+  `x-livechat-signature` event webhook, so a host terminating an external
+  agent, a customer card, a canvas step, an AI tool call or a workflow action
+  had to write the other constructions themselves. Three of those surfaces
+  send **`x-chatly-signature`** and sign three DIFFERENT base strings —
+  `<t>.<body>`, `<t>.<METHOD>.<path>.<body>` and `<ts>.<body>` with the
+  timestamp in a separate header — so the function takes a required `surface`
+  rather than inferring one from the header name, which cannot be done
+  correctly.
+- Two surfaces time-stamp in **milliseconds** (`canvas_step`,
+  `customer_card`). `toleranceSeconds` stays in seconds and the conversion is
+  the function's job: a millisecond timestamp read as seconds lands ~54,000
+  years out, so the freshness check rejects everything and the failure looks
+  like a wrong secret. When that happens the refusal now names the unit.
+- It returns a discriminated union rather than a boolean. `reason` is a stable
+  string (`signature_mismatch`, `timestamp_outside_tolerance`,
+  `duplicate_signature_header`, …) and `message` is written to be printed.
+  It never throws, on any input — per CONTRACT.md §6, a verifier that throws
+  is an accepted webhook in a handler that forgot to catch.
+- `workflow_webhook_legacy` is refused unless you pass
+  `allowUnprotectedReplay: true`. That header signs the body with no
+  timestamp, so a captured request verifies forever; the same call also sends
+  `x-chatly-signature-v2`, which is replay-bounded, and the refusal says so.
+- `CHATLY_SIGNATURE_SURFACES` is exported as data — the header names, base
+  strings and units, which is what you want in front of you when a
+  verification fails.
+
+### Unchanged
+
+- `verifyWebhookSignature` is untouched and still exported. It is published
+  and in use; the new function is the recommended path, not a replacement.
+
+## 0.3.1 — 2026-10-14
+
+- **Publishes `ATTRIBUTION_DIMENSIONS`, which 0.3.0 exported in source and not
+  on npm.** The export was added to `src/index.ts` after 0.3.0 was published,
+  with no version bump, so the registry's 0.3.0 does not contain it. That
+  broke `@chatlychat/cli@0.1.6` outright: pnpm rewrites the CLI's
+  `workspace:*` to the published range at pack time, so the installed CLI
+  imported a symbol its installed SDK did not provide and every command died
+  with `SyntaxError: The requested module '@chatlychat/sdk-node' does not
+provide an export named 'ATTRIBUTION_DIMENSIONS'`.
+- No other change. Same code, published under a number that reflects it.
+
 ## 0.3.0
 
 Three routes paginate that this SDK was treating as single reads, and one that

@@ -489,9 +489,11 @@ describe('the paged set matches the manifest', () => {
    * The manifest's `paged` flag was wrong in BOTH directions for a day:
    * `macros.list` was flagged and is `@PaginationExempt`, while
    * `contacts.journey`, `conversations.unattended` and `search.query` return
-   * real cursors and were not flagged. Eight became ten. Nothing connected
-   * the flag to this SDK's paginators, which is how that went unnoticed — so
-   * this reads the manifest and checks both directions.
+   * real cursors and were not flagged. Eight became ten, and the 55 -> 142
+   * expansion made it twelve: `bots.list` and `triggers.list` both go through
+   * `buildPaginatedResponse`. Nothing connected the flag to this SDK's
+   * paginators, which is how that went unnoticed — so this reads the manifest
+   * and checks both directions.
    */
   it('every paged entry has an auto-paginating form here, and no other does', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
@@ -516,14 +518,14 @@ describe('the paged set matches the manifest', () => {
 
     const paged = manifest.entries.filter((e) => e.paged === true);
     /*
-     * Floor, with the reason in the message. Ten today. It moved 8 → 10 on
-     * evidence; if it drops, check that the manifest still parses before
-     * concluding a route legitimately stopped paginating.
+     * Floor, with the reason in the message. Twelve today. It moved 8 → 10 and
+     * then 10 → 12 on evidence; if it drops, check that the manifest still
+     * parses before concluding a route legitimately stopped paginating.
      */
     expect(
       paged.length,
       'the paged set shrank — confirm surface.json parsed first',
-    ).toBeGreaterThanOrEqual(10);
+    ).toBeGreaterThanOrEqual(12);
 
     const { chatly } = client([{ status: 200, body: '{"items":[],"nextCursor":null}' }]);
     const bag = chatly as unknown as Record<string, Record<string, unknown>>;
@@ -539,7 +541,17 @@ describe('the paged set matches the manifest', () => {
       'kb.articles': ['kb', 'listAll'],
       'search.query': ['search', 'queryAll'],
       'events.list': ['events', 'listAll'],
-      'webhooks.deliveries': ['webhooks', 'listAll'],
+      /*
+       * `deliveriesAll`, not `listAll`. `webhooks.list` is now
+       * `GET /v1/webhooks` — the endpoint list, a bare array — so the delivery
+       * page moved off `list`. While `list` pointed at deliveries there was no
+       * method at all for the endpoints, and a walker named `listAll` beside a
+       * non-paginating `list` would have been a trap.
+       */
+      'webhooks.deliveries': ['webhooks', 'deliveriesAll'],
+      'bots.list': ['bots', 'listAll'],
+      'bots.deliveries': ['bots', 'deliveriesAll'],
+      'triggers.list': ['triggers', 'listAll'],
     };
 
     for (const entry of paged) {
@@ -552,10 +564,16 @@ describe('the paged set matches the manifest', () => {
 
     // And nothing walks a route the manifest does not flag. `macros` is the
     // one that mattered: a paginator there raised a decode error on the real
-    // bare-array response in two sibling SDKs.
+    // bare-array response in two sibling SDKs. `billing.invoices` is the new
+    // hazard — it IS cursor-paginated, but under `data`, so a walker keyed on
+    // `items` would answer an empty page with a 200 forever.
     expect(
       bag['macros']?.['listAll'],
       'macros does not paginate — the route is exempt',
+    ).toBeUndefined();
+    expect(
+      bag['billing']?.['invoicesAll'],
+      'billing.invoices paginates under `data`, so a generic walker is wrong',
     ).toBeUndefined();
   });
 });

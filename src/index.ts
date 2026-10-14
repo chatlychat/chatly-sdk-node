@@ -10,19 +10,30 @@
  * SDKs implement; the behavioural contract is `packages/sdk-spec/CONTRACT.md`.
  */
 import {
+  aiResource,
   billingResource,
+  canvasStepsResource,
+  botRoutesResource,
+  botsResource,
+  brandsResource,
   channelsResource,
   contactsResource,
   conversationsResource,
+  customerCardEndpointsResource,
+  customerCardsResource,
+  docsSourcesResource,
+  emailTemplatesResource,
   eventsResource,
   kbResource,
+  knowledgeGapsResource,
   macrosResource,
   reportsResource,
   searchResource,
   ticketsResource,
+  triggersResource,
   webhooksResource,
   workspaceResource,
-} from './resources.js';
+} from './resources/index.js';
 import { Transport, type Query, type TransportOptions } from './transport.js';
 
 export type ClientOptions = TransportOptions;
@@ -52,19 +63,63 @@ export {
   WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
   type VerifyWebhookSignatureInput,
 } from './webhooks.js';
+/*
+ * The verifier to reach for. `verifyWebhookSignature` above covers the event
+ * webhook only; this one covers all seven outbound constructions, which is
+ * what a host terminating more than one of them needs — three of those
+ * surfaces send `x-chatly-signature` and sign three DIFFERENT strings, so the
+ * header name is not enough to choose a construction from.
+ */
+export {
+  verifyChatlySignature,
+  CHATLY_SIGNATURE_SURFACES,
+  CHATLY_SIGNATURE_TOLERANCE_SECONDS,
+  type ChatlyHeaders,
+  type ChatlySignatureFailure,
+  type ChatlySignatureSurface,
+  type VerifyChatlySignatureInput,
+  type VerifyChatlySignatureResult,
+} from './signatures.js';
 export { chatlyIdentityHash } from './identity.js';
+/*
+ * A VALUE, not just a type. A caller validating or offering the ten
+ * attribution dimensions needs them at runtime — the `chatly` CLI prints them
+ * when it refuses a typo, and kept its own second copy until this existed.
+ */
+export { ATTRIBUTION_DIMENSIONS } from './resources/index.js';
 export type {
   AgentHandlingInput,
+  AiProviderKey,
+  AttributionDimension,
+  ConnectAiProviderInput,
   ContactInput,
+  CreatableChannelType,
+  CreateChannelInput,
+  CreateDocsSourceInput,
+  CreateWebhookInput,
+  CustomerCardInput,
+  DiscoverDocsInput,
+  DocsProvider,
+  EmailTemplateKind,
+  EmailTemplateWriteInput,
   EventListQuery,
+  KnowledgeGapStatus,
   MergeContactInput,
   MergeTicketsInput,
   MessageInput,
+  ReportGranularity,
+  ReportRangeQuery,
   ScheduleMessageInput,
+  ToneCategory,
+  ToneRuleInput,
+  TriggerCondition,
   UnsubscribeContactInput,
+  UpdateChannelInput,
+  UpsertTriggerInput,
   TrackEventInput,
   Unmodelled,
-} from './resources.js';
+  UsageEventType,
+} from './resources/index.js';
 
 /**
  * Reaction payload.
@@ -100,7 +155,21 @@ export class ChatlyClient {
   public readonly reports: ReturnType<typeof reportsResource>;
   public readonly channels: ReturnType<typeof channelsResource>;
   public readonly billing: ReturnType<typeof billingResource>;
+  /** `canvas_steps` in the manifest; camelCase here, per CONTRACT.md §9. */
+  public readonly canvasSteps: ReturnType<typeof canvasStepsResource>;
   public readonly workspace: ReturnType<typeof workspaceResource>;
+  public readonly ai: ReturnType<typeof aiResource>;
+  public readonly bots: ReturnType<typeof botsResource>;
+  /** `bot_routes` in the manifest; camelCase here, per CONTRACT.md §9. */
+  public readonly botRoutes: ReturnType<typeof botRoutesResource>;
+  public readonly brands: ReturnType<typeof brandsResource>;
+  public readonly customerCards: ReturnType<typeof customerCardsResource>;
+  /** `customer_card_endpoints` in the manifest; camelCase here, per CONTRACT.md §9. */
+  public readonly customerCardEndpoints: ReturnType<typeof customerCardEndpointsResource>;
+  public readonly docsSources: ReturnType<typeof docsSourcesResource>;
+  public readonly emailTemplates: ReturnType<typeof emailTemplatesResource>;
+  public readonly knowledgeGaps: ReturnType<typeof knowledgeGapsResource>;
+  public readonly triggers: ReturnType<typeof triggersResource>;
 
   public constructor(opts: ClientOptions);
   public constructor(transport: Transport);
@@ -130,7 +199,18 @@ export class ChatlyClient {
     this.reports = reportsResource(t);
     this.channels = channelsResource(t);
     this.billing = billingResource(t);
+    this.canvasSteps = canvasStepsResource(t);
     this.workspace = workspaceResource(t);
+    this.ai = aiResource(t);
+    this.bots = botsResource(t);
+    this.botRoutes = botRoutesResource(t);
+    this.brands = brandsResource(t);
+    this.customerCards = customerCardsResource(t);
+    this.customerCardEndpoints = customerCardEndpointsResource(t);
+    this.docsSources = docsSourcesResource(t);
+    this.emailTemplates = emailTemplatesResource(t);
+    this.knowledgeGaps = knowledgeGapsResource(t);
+    this.triggers = triggersResource(t);
   }
 
   /**
@@ -165,7 +245,7 @@ export class ChatlyClient {
    * Describe the credential this client is using: which workspace it belongs
    * to and which scopes it was granted.
    *
-   * `GET /v1/api-keys/whoami` is deliberately the ONLY route on the api-keys
+   * `GET /v1/api-keys/whoami` is one of two routes on the api-keys
    * controller that accepts an API key (managing keys with a key is a
    * privilege-escalation shape). It is the call to make first: it turns a
    * mis-scoped key into an obvious error at integration time rather than a
@@ -181,7 +261,24 @@ export class ChatlyClient {
   }
 
   /**
-   * Call any route, including the 85 key-accessible ones with no typed method
+   * Who the caller is, whichever kind of caller it is.
+   *
+   * Discriminated on `principal`. A `ck_` key gets the same object as
+   * `whoami()` — there is no user behind a key — and a session token gets the
+   * user plus their active membership. The handler's own docblock calls it
+   * "the liveness check every SDK wants": a key with no useful scope still
+   * gets a 200, and that answer is true.
+   *
+   * Prefer this over `whoami()` in code that may run with either credential.
+   * `whoami()` stays because it is the narrower, key-only question and names
+   * the scopes.
+   */
+  public async me(): Promise<Record<string, unknown>> {
+    return this.transport.get<Record<string, unknown>>('/v1/me');
+  }
+
+  /**
+   * Call any route, including the key-accessible ones with no typed method
    * here. Goes through the same auth, idempotency, retry and error handling.
    *
    *   ```ts
