@@ -1,6 +1,6 @@
 # @chatlychat/sdk-node
 
-## Unreleased
+## 0.6.0 — 2026-10-15
 
 ### Added
 
