@@ -421,6 +421,11 @@ export function invocations(chatly: ChatlyClient): Invocation[] {
         }),
     },
     { key: 'triggers.delete', call: () => chatly.triggers.delete(ARG.id) },
+
+    {
+      key: 'visitors.start_conversation',
+      call: () => chatly.visitors.startConversation(ARG.contactId),
+    },
   ];
 }
 

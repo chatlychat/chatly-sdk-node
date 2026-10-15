@@ -81,7 +81,45 @@ export interface SurfaceCase {
 export const TOOL_METHOD = 'GET';
 export const TOOL_PATH = '/orders/4471?expand=lines';
 
+/**
+ * The method and path the UNIFIED v2 construction signs.
+ *
+ * A path with a query string, because `path` is `pathname + search` and a
+ * verifier that dropped the search would still pass on a bare path.
+ */
+export const V2_METHOD = 'POST';
+export const V2_PATH = '/hooks/chatly?tenant=acme';
+
+/** The unified base string, written out rather than built by the verifier. */
+export function v2Base(opts: {
+  tsSeconds: number;
+  method?: string;
+  path?: string;
+  body: string;
+}): string {
+  return `${String(opts.tsSeconds)}.${opts.method ?? V2_METHOD}.${opts.path ?? V2_PATH}.${opts.body}`;
+}
+
+/** The `x-chatly-signature-v2` value for one request. */
+export function v2Header(opts: {
+  secret: string;
+  body: string;
+  tsSeconds: number;
+  method?: string;
+  path?: string;
+}): string {
+  return `t=${String(opts.tsSeconds)},v1=${hmac(opts.secret, v2Base(opts))}`;
+}
+
 export const CASES: readonly SurfaceCase[] = [
+  {
+    surface: 'unified_v2',
+    unit: 'seconds',
+    extra: { method: V2_METHOD, path: V2_PATH },
+    headersFor: ({ secret, body, tsSeconds }) => ({
+      'x-chatly-signature-v2': v2Header({ secret, body, tsSeconds }),
+    }),
+  },
   {
     surface: 'agent_delivery',
     unit: 'seconds',

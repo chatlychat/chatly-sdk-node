@@ -87,6 +87,8 @@ const result = verifyChatlySignature({
   body: rawBody, // the EXACT bytes, before JSON.parse
   headers: req.headers,
   secret: process.env.CHATLY_WEBHOOK_SECRET!,
+  method: req.method, // see "the unified v2 signature" below
+  path: req.url,
 });
 
 if (!result.ok) {
@@ -101,10 +103,11 @@ string to branch on (`signature_mismatch`, `timestamp_outside_tolerance`,
 `missing_signature_header`, …) and `message` is a sentence written to be
 printed. It never throws.
 
-### The seven surfaces
+### The eight surfaces
 
 | `surface`                 | Header(s)                                                      | Signed string                   | `t` unit         |
 | ------------------------- | -------------------------------------------------------------- | ------------------------------- | ---------------- |
+| `unified_v2`              | `x-chatly-signature-v2: t=…,v1=…`                              | `<t>.<METHOD>.<path>.<rawBody>` | seconds          |
 | `agent_delivery`          | `x-chatly-signature: t=…,v1=…`                                 | `<t>.<rawBody>`                 | seconds          |
 | `event_webhook`           | `x-livechat-signature: t=…,v1=…`                               | `<t>.<rawBody>`                 | seconds          |
 | `ai_tool_call`            | `x-chatly-signature: t=…,v1=…`                                 | `<t>.<METHOD>.<path>.<rawBody>` | seconds          |
@@ -130,6 +133,74 @@ webhook call sends both headers. The legacy one signs the body with no
 timestamp, so a captured request verifies forever and nothing can bound a
 replay; `verifyChatlySignature` refuses it unless you pass
 `allowUnprotectedReplay: true`, and if you do, make the endpoint idempotent.
+
+### The unified v2 signature
+
+Every surface is moving to **one** construction:
+
+```
+x-chatly-signature-v2: t=<unix seconds>,v1=<hex>
+v1 = HMAC-SHA256(secret, `${t}.${METHOD}.${path}.${rawBody}`)
+```
+
+It is sent **alongside** each surface's existing header, so nothing breaks
+while senders migrate. `path` is `pathname + search` of the request as it
+arrived — never the scheme, never the host. The method and the path are inside
+the digest because a `GET` with no body otherwise signs `"<t>.."`, which is
+identical for every `GET` that surface ever makes and replayable against any
+path.
+
+Pass `method` and `path` on **every** call and you need no code change when a
+sender moves: `v2` defaults to `'prefer'`, so the v2 header is verified the
+moment it appears and the legacy construction is verified until then.
+
+```ts
+const result = verifyChatlySignature({
+  surface: 'customer_card',
+  body: rawBody,
+  headers: req.headers,
+  secret: process.env.CHATLY_CARD_SECRET!,
+  method: req.method,
+  path: req.url,
+  v2: 'prefer', // the default: 'require' once you know the sender has moved
+});
+// result.surface is 'unified_v2' when the v2 header was the one that verified.
+```
+
+`'prefer'` never falls back: if the v2 header is present and does not verify,
+that is a refusal rather than a reason to try the legacy header. Both headers
+come from the same secret, so a good legacy digest beside a bad v2 one is
+tampering or a sender bug, and accepting it would hide both. Use
+`v2: 'ignore'` to pin the old behaviour.
+
+One wrinkle, and it is ours: `workflow_webhook` already sends
+`x-chatly-signature-v2`, over `<t>.<rawBody>` — that header predates the
+unified base. So on that surface **both** bases are accepted whenever you
+supply `method` and `path`, and `result.base` (`'body'` or `'target'`) tells
+you which one the sender used.
+
+### Rotating a secret
+
+Both ends of a rotation are supported:
+
+```ts
+const result = verifyChatlySignature({
+  surface: 'agent_delivery',
+  body: rawBody,
+  headers: req.headers,
+  secret: [process.env.CHATLY_SECRET_NEW!, process.env.CHATLY_SECRET_OLD!],
+});
+if (result.ok) {
+  console.log('verified with secret', result.secretIndex); // 0 = the new one
+}
+```
+
+- **`secret` takes an array.** Accept the old and the new secret for as long
+  as the overlap lasts; `result.secretIndex` is how you learn the old one has
+  stopped being used.
+- **The header can carry a list of digests** — `t=…,v1=…,v1=…` — for a sender
+  signing with two secrets at once. Any one matching verifies; every one of
+  them has to be well formed.
 
 ### `verifyWebhookSignature` (still supported)
 

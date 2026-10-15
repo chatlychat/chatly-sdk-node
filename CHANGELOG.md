@@ -1,5 +1,120 @@
 # @chatlychat/sdk-node
 
+## Unreleased
+
+### Added
+
+- **`bots.rotateExternalSecret(id, { activateAt })`** — the overlap window
+  `POST /v1/bots/{id}/external/rotate-secret` gained server-side. `activateAt`
+  is a `Date` (sent as its UTC ISO form) or an ISO string (sent verbatim), at
+  most 168 hours ahead by the server's clock. Until that instant the OLD
+  secret goes on signing every delivery, so pass both to
+  `verifyChatlySignature`'s `secret` array for the window. The result is now
+  typed `RotatedExternalSecret`: `{ signingSecret, activatesAt }`, where
+  `activatesAt` is null for a hard cut. With no `activateAt` the call sends no
+  body, exactly as before, and is the same hard cut.
+
+## 0.6.0 — 2026-10-14
+
+### Added
+
+- **`unified_v2` — the one construction every surface is moving to.**
+  `x-chatly-signature-v2: t=<unix seconds>,v1=<hex>` over
+  `` `${t}.${METHOD}.${path}.${rawBody}` ``, sent alongside each surface's
+  legacy header so nothing breaks while senders migrate.
+  `verifyChatlySignature` verifies it as a surface of its own, and the table
+  in `CHATLY_SIGNATURE_SURFACES` is the authority for which surfaces send it.
+- **`v2: 'prefer' | 'require' | 'ignore'`, defaulting to `'prefer'`.** Pass
+  `method` and `path` on every call and the migration costs the integrator
+  nothing: the v2 header is verified the moment a sender starts emitting it,
+  and the surface's own construction is verified until then. `'prefer'` never
+  cross-falls-back — a present v2 header that does not verify is a refusal,
+  because both headers come from the same secret and accepting the legacy one
+  would hide either tampering or a sender bug. `result.surface` reports what
+  actually verified.
+- **`secret` accepts an array**, for a receiver mid-rotation, and the ok arm
+  carries `secretIndex` — which is how you learn the old secret has stopped
+  being used. A `t=…,v1=…,v1=…` header with several digests is accepted too,
+  for a sender signing with two secrets at once; any one matching verifies and
+  every one has to be well formed.
+- `result.base` on success: `'body'`, `'target'` or `'body_only'` — which
+  string the matching MAC was taken over. It earns its place on
+  `workflow_webhook`, which has sent `x-chatly-signature-v2` over
+  `` `${t}.${rawBody}` `` since before the unified base existed; that surface
+  now accepts BOTH bases whenever `method` and `path` are supplied, so the
+  sender's eventual switch is invisible to a receiver.
+
+### Changed
+
+- A timestamp outside the tolerance now says which DIRECTION it is out in
+  ("in the FUTURE" / "in the past"). Far-future timestamps were already
+  refused; nothing said so, and a wrong UNIT is far-future by ~54,000 years.
+- The surface table moved to `signature-table.ts` (650-line ceiling).
+  `./signatures.js` re-exports all of it, so every import is unchanged.
+
+### Note on the wire format
+
+- **`x-chatly-signature-v2` now carries a base marker: `t=…,v1=…,b=t`.** The
+  platform appends a `b` field saying which string the digest is over — `b=t`
+  for the unified `` `${t}.${METHOD}.${path}.${rawBody}` `` base and `b=b` for
+  `` `${t}.${rawBody}` ``. **An ABSENT marker means `` `${t}.${rawBody}` ``**,
+  because every v2 signature sent before the marker existed came from the
+  workflow-webhook surface over that base. Nothing in this package needs to
+  change: `parseTv1` collects `t` and `v1` by key and ignores unknown fields,
+  which is exactly what makes a marker backwards compatible where a third
+  header name would have made every existing verifier wrong. A future release
+  may read the marker instead of trying both bases on
+  `workflow_webhook`.
+- Two more surfaces send the v2 header as of this release: the event webhook
+  (beside `x-livechat-signature`) and the external-agent push delivery (beside
+  `x-chatly-signature`), both on the unified base. Pass `method` and `path`
+  and the default `v2: 'prefer'` picks them up with no code change.
+  `POST /v1/bots/{id}/test-delivery` now returns `signatureV2` beside
+  `signature`, so a verifier can be built against a rehearsal.
+
+## 0.5.0 — 2026-10-14
+
+### Added
+
+- **Three key-accessible routes that were in no SDK.** The manifest was
+  missing `DELETE /v1/webhooks/{id}`, `GET /v1/me` and
+  `GET /v1/workspaces/me`, all three of which carry `@AllowApiKey()`; they
+  were found by three SDK authors independently, reading handlers rather than
+  the manifest. With them this package covers the whole 162-route surface.
+  - `webhooks.delete(id)` — a key that can add a delivery target and not
+    remove one can only ever add. The workaround that was recommended instead
+    (point the endpoint at a dead URL) leaves the subscription alive and the
+    delivery log filling with failures.
+  - `client.me()` — who the caller is, whichever kind of caller it is,
+    discriminated on `principal`: a `ck_` key gets the same object as
+    `whoami()`, a session token gets the user plus their active membership.
+    Prefer it in code that may run with either credential; `whoami()` stays
+    as the narrower, key-only question that names the scopes.
+  - `workspace.mine()` — for a key, the one workspace it was issued in. A
+    cheap way to confirm which tenant a key points at when one deploy script
+    runs against staging and production.
+
+### Fixed
+
+- A claim beside `whoami()` said `/v1/api-keys/whoami` is "deliberately the
+  ONLY route on the api-keys controller that accepts an API key".
+  `/v1/api-keys/scopes` is a second, and this SDK reaches it through
+  `workspace.keyScopes`. The same sentence was in the .NET and Java packages.
+
+### Changed
+
+- `SDK_VERSION` tracks `package.json` and is stamped into every `User-Agent`.
+  A spec asserts the two agree: the CLI's equivalent literal had drifted two
+  patch versions and told every user the wrong number.
+
+### Why 0.5.0 had no entry until 0.6.0
+
+It was published as a drift fix in a hurry — the docs had been updated to say
+162 methods while `0.4.0` on npm had 159, so a developer who installed it,
+read the page and called `client.me()` got `undefined` — and the changelog
+line was the thing that got skipped. Recorded here from the commits rather
+than from memory.
+
 ## 0.4.0 — 2026-10-14
 
 ### Added

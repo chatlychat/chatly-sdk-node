@@ -1,5 +1,5 @@
 /**
- * `verifyChatlySignature`, held to every one of the seven constructions.
+ * `verifyChatlySignature`, held to every one of the eight constructions.
  *
  * The surface table and the signing helpers are in
  * `test/signature-fixtures.ts`, which also records why these tests sign by
@@ -17,6 +17,8 @@
  *
  * The cross-surface confusions, the legacy workflow header, the malformed
  * inputs and the published fixed vector are in `signature-surfaces.spec.ts`.
+ * The unified v2 construction, the `v2` policy and key rotation are in
+ * `signature-v2.spec.ts`.
  */
 import { describe, expect, it } from 'vitest';
 

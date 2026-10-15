@@ -31,6 +31,7 @@ import {
   searchResource,
   ticketsResource,
   triggersResource,
+  visitorsResource,
   webhooksResource,
   workspaceResource,
 } from './resources/index.js';
@@ -65,21 +66,32 @@ export {
 } from './webhooks.js';
 /*
  * The verifier to reach for. `verifyWebhookSignature` above covers the event
- * webhook only; this one covers all seven outbound constructions, which is
+ * webhook only; this one covers all eight outbound constructions, which is
  * what a host terminating more than one of them needs — three of those
  * surfaces send `x-chatly-signature` and sign three DIFFERENT strings, so the
  * header name is not enough to choose a construction from.
+ *
+ * `unified_v2` is the one every surface is moving to:
+ * `x-chatly-signature-v2: t=…,v1=…` over `<t>.<METHOD>.<path>.<rawBody>`,
+ * sent alongside each surface's legacy header. Pass `method` and `path` on
+ * every call and the default `v2: 'prefer'` picks it up the day a sender
+ * starts emitting it, with no code change.
  */
 export {
   verifyChatlySignature,
   CHATLY_SIGNATURE_SURFACES,
   CHATLY_SIGNATURE_TOLERANCE_SECONDS,
+  CHATLY_V2_SIGNATURE_HEADER,
   type ChatlyHeaders,
+  type ChatlySignatureBase,
   type ChatlySignatureFailure,
   type ChatlySignatureSurface,
+  type ChatlyV2Policy,
   type VerifyChatlySignatureInput,
   type VerifyChatlySignatureResult,
 } from './signatures.js';
+
+export { signChatlyV2, chatlyV2BaseString, chatlyV2SigningPath } from './signature-mint.js';
 export { chatlyIdentityHash } from './identity.js';
 /*
  * A VALUE, not just a type. A caller validating or offering the ten
@@ -109,6 +121,7 @@ export type {
   MessageInput,
   ReportGranularity,
   ReportRangeQuery,
+  RotatedExternalSecret,
   ScheduleMessageInput,
   ToneCategory,
   ToneRuleInput,
@@ -170,6 +183,7 @@ export class ChatlyClient {
   public readonly emailTemplates: ReturnType<typeof emailTemplatesResource>;
   public readonly knowledgeGaps: ReturnType<typeof knowledgeGapsResource>;
   public readonly triggers: ReturnType<typeof triggersResource>;
+  public readonly visitors: ReturnType<typeof visitorsResource>;
 
   public constructor(opts: ClientOptions);
   public constructor(transport: Transport);
@@ -211,6 +225,7 @@ export class ChatlyClient {
     this.emailTemplates = emailTemplatesResource(t);
     this.knowledgeGaps = knowledgeGapsResource(t);
     this.triggers = triggersResource(t);
+    this.visitors = visitorsResource(t);
   }
 
   /**

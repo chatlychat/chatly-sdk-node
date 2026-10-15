@@ -4,8 +4,10 @@
  * every malformed input, and the published fixed vector.
  *
  * Split out of `signatures.spec.ts` to stay under this repo's 650-line
- * ceiling. The table-driven per-surface tests are there; the shared fixtures
- * are in `test/signature-fixtures.ts`, which records why they sign by hand.
+ * ceiling. The table-driven per-surface tests are there; the unified v2
+ * construction, the `v2` policy and key rotation are in
+ * `signature-v2.spec.ts`; the shared fixtures are in
+ * `test/signature-fixtures.ts`, which records why they sign by hand.
  */
 
 import { describe, expect, it } from 'vitest';

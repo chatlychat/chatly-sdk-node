@@ -279,6 +279,19 @@ export const EXPECTED_SHAPE: Readonly<Record<string, Shape>> = {
   'triggers.create': 'object',
   // 200 with `{ ok: true }`, not a 204.
   'triggers.delete': 'object',
+
+  /*
+   * `{ conversationId }` — one key, and an object rather than a page.
+   *
+   * There is no `@ZodResponse` on this handler, so the shape is read off what
+   * the service it forwards to is declared to return:
+   * `VisitorsService.startProactiveConversation(): Promise<{ conversationId:
+   * string }>`. Nothing about the route's name or its verb says `object` —
+   * `conversations.send` is the sibling that also answers a single created
+   * thing — so the declaration here is from the handler, not from the shape
+   * of the URL.
+   */
+  'visitors.start_conversation': 'object',
 };
 
 /**
@@ -297,5 +310,8 @@ export const EXPECTED_SHAPE: Readonly<Record<string, Shape>> = {
  * and not a page: it is one bot's rollup over one window, and the thing that
  * would make it a page — a row per bot — is what
  * `GET /v1/reports/analytics/assistants` already answers.
+ *
+ * `visitors.start_conversation` took `object` from 115 to 116 on 2026-10-14,
+ * the day the route opened to API keys. It answers `{ conversationId }`.
  */
-export const EXPECTED_DISTRIBUTION = { array: 33, page: 13, object: 115, empty: 1 } as const;
+export const EXPECTED_DISTRIBUTION = { array: 33, page: 13, object: 116, empty: 1 } as const;

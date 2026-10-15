@@ -25,6 +25,7 @@ export type { ToneCategory, ToneRuleInput } from './ai.js';
 export { billingResource, type UsageEventType } from './billing.js';
 export { canvasStepsResource } from './canvas-steps.js';
 export { botRoutesResource, botsResource } from './bots.js';
+export type { RotatedExternalSecret } from './bots.js';
 export { brandsResource } from './brands.js';
 export {
   channelsResource,
@@ -75,5 +76,6 @@ export {
 export { searchResource } from './search.js';
 export { ticketsResource, type MergeTicketsInput } from './tickets.js';
 export { triggersResource, type TriggerCondition, type UpsertTriggerInput } from './triggers.js';
+export { visitorsResource } from './visitors.js';
 export { webhooksResource, type CreateWebhookInput } from './webhooks.js';
 export { workspaceResource } from './workspace.js';

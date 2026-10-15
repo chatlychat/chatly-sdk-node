@@ -2,6 +2,16 @@ import { listable, listableAt } from '../pagination.js';
 
 import type { Query, Transport, Unmodelled } from './common.js';
 
+/** `POST /v1/bots/{id}/external/rotate-secret` — the secret, once. */
+export interface RotatedExternalSecret {
+  readonly signingSecret: string;
+  /**
+   * Null when the new secret is already signing. Otherwise the instant it
+   * takes over; the previous secret signs every delivery until then.
+   */
+  readonly activatesAt: string | null;
+}
+
 export function botsResource(t: Transport) {
   const deliveryPages = listableAt<Unmodelled>(
     t,
@@ -61,12 +71,34 @@ export function botsResource(t: Transport) {
       t.patch<Unmodelled>(`/v1/bots/${encodeURIComponent(id)}/external`, body),
     /**
      * Mint a new signing secret for an external agent. Answers 201 with
-     * `{ signingSecret }` — that field name, not `secret` and not `token`.
+     * `{ signingSecret, activatesAt }` — that field name, not `secret` and
+     * not `token`. The secret is shown once.
      *
-     * No body. The previous secret stops verifying immediately.
+     * With no `activateAt` this sends no body, and it is a hard cut: the new
+     * secret signs the next delivery and `activatesAt` is null.
+     *
+     * With `activateAt` (at most 168 hours ahead, measured by the server's
+     * clock — a 400 past that) the OLD secret keeps signing every delivery
+     * until that instant, and `activatesAt` echoes it. Hold both in your
+     * verifier for the window — `verifyChatlySignature`'s `secret` takes
+     * an array. Each delivery still carries ONE signature. An instant already
+     * past, or an agent with no usable secret today, is a hard cut and
+     * answers `activatesAt: null`; read the field rather than assuming.
+     *
+     * A `Date` is sent as its UTC ISO form; a string is sent verbatim.
      */
-    rotateExternalSecret: (id: string) =>
-      t.post<Unmodelled>(`/v1/bots/${encodeURIComponent(id)}/external/rotate-secret`),
+    rotateExternalSecret: (id: string, options: { activateAt?: string | Date } = {}) =>
+      t.post<RotatedExternalSecret>(
+        `/v1/bots/${encodeURIComponent(id)}/external/rotate-secret`,
+        options.activateAt === undefined
+          ? undefined
+          : {
+              activateAt:
+                options.activateAt instanceof Date
+                  ? options.activateAt.toISOString()
+                  : options.activateAt,
+            },
+      ),
     /**
      * One page of an external agent's delivery ledger, newest first.
      *

@@ -63,7 +63,17 @@ export class ChatlyApiError extends ChatlyError {
 export class ChatlyAuthenticationError extends ChatlyApiError {
   public override readonly name: string = 'ChatlyAuthenticationError';
 }
-/** 403 — the key is valid and lacks the scope this route needs. Check `whoami()`. */
+/**
+ * 403 — the key is valid but the request is not allowed.
+ *
+ * Usually a missing scope, and `whoami()` lists what the key holds. But a
+ * scope is not the only gate: `visitors.startConversation` is also behind a
+ * per-workspace opt-in that is OFF by default
+ * (`settings.proactiveOutreach.apiKeysMayStartConversations`), and a key
+ * holding `conversations:write` still gets a 403 from it until an admin turns
+ * that on. Read the `message` before re-minting a key that was never the
+ * problem.
+ */
 export class ChatlyPermissionError extends ChatlyApiError {
   public override readonly name: string = 'ChatlyPermissionError';
 }
