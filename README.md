@@ -179,6 +179,26 @@ unified base. So on that surface **both** bases are accepted whenever you
 supply `method` and `path`, and `result.base` (`'body'` or `'target'`) tells
 you which one the sender used.
 
+The value carries a **base marker**: `t=…,v1=…,b=t` for the unified base,
+`b=b` for `<t>.<rawBody>`. An absent marker means `<t>.<rawBody>`, because
+every v2 value sent before the marker existed was that. The verifier reads it
+to narrow what it tries and to name the cause when it refuses — a `b=t`
+workflow request with no `method`/`path` is `missing_request_target`, not a
+mismatch — but never to accept more than the surface allows, since anyone on
+the wire can write a marker.
+
+**Which surfaces send `x-chatly-signature-v2` today:** agent delivery, the
+event webhook, customer-card fetches and canvas / step callbacks, all `b=t`;
+the workflow action, `b=b`. AI tool calls do not send it yet — their legacy
+`x-chatly-signature` already signs the unified string, so `'prefer'` falls
+through to an identical check and you lose nothing by passing `method` and
+`path` now.
+
+**If you terminate several surfaces, verify them all as `unified_v2`.** That
+is the one documented path for the v2 header; the per-surface names are for
+the legacy headers. The single exception, until its sender moves to `b=t`, is
+the workflow action — verify that as `workflow_webhook`.
+
 ### Rotating a secret
 
 Both ends of a rotation are supported:

@@ -45,6 +45,41 @@
  * a receiver that passes both keeps verifying across the sender's switch.
  * `unified_v2` is strict and accepts only the target base.
  *
+ * The value carries a base marker — `b=t` for the target base, `b=b` for the
+ * body base, ABSENT meaning the body base because that is every v2 value sent
+ * before the marker existed. The verifier reads it to narrow the candidates
+ * and to name the cause of a refusal; it never widens what a surface
+ * accepts, since anyone on the wire can write a marker.
+ *
+ * ── Who sends `x-chatly-signature-v2` (2026-10-15) ───────────────────────
+ *
+ *   | surface            | v2 sent? | marker |
+ *   | ------------------ | -------- | ------ |
+ *   | `agent_delivery`   | yes      | `b=t`  |
+ *   | `event_webhook`    | yes      | `b=t`  |
+ *   | `customer_card`    | yes      | `b=t`  |
+ *   | `canvas_step`      | yes      | `b=t`  |
+ *   | `workflow_webhook` | yes      | `b=b` — its sender has not moved yet |
+ *   | `ai_tool_call`     | **no**   | —      |
+ *
+ * A tool call's LEGACY `x-chatly-signature` already signs the target base,
+ * so its v2 value will be that same digest plus `b=t`; until the sender emits
+ * it, `prefer` falls through to the legacy header and verifies the identical
+ * string, so a receiver loses nothing by passing `surface: 'ai_tool_call'`.
+ *
+ * ── One documented path: `unified_v2`, not a surface per sender ──────────
+ *
+ * There is deliberately no second name for the tool-call surface beside
+ * `ai_tool_call`. The documented path for the v2 header is `surface:
+ * 'unified_v2'` with `method` and `path`, on all six, and the per-surface
+ * names exist for the LEGACY headers — which header, which unit, which secret
+ * the error message should name. Adding a surface per sender for the v2
+ * header would mean six names for one construction, each ported to eight
+ * SDKs, and a receiver terminating several surfaces would still have to
+ * branch on which one it is to pick the name. With `unified_v2` it does not.
+ * The one exception is the workflow action until it signs `b=t`: verify it as
+ * `workflow_webhook`, which accepts both bases.
+ *
  * ── The unit trap, which this repo has paid for twice ────────────────────
  *
  * Two surfaces send MILLISECONDS. A millisecond timestamp read as seconds

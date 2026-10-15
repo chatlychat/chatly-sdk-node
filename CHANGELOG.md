@@ -1,5 +1,36 @@
 # @chatlychat/sdk-node
 
+## Unreleased
+
+### Changed
+
+- **`verifyChatlySignature` reads the `b=` base marker** on
+  `x-chatly-signature-v2`. It narrows what is tried and names the cause of a
+  refusal; it never widens what a surface accepts. `unified_v2` refuses a
+  `b=b` value with a message pointing at `workflow_webhook`;
+  `workflow_webhook` with `b=t` and no `method`/`path` is now
+  `missing_request_target` (was `signature_mismatch`); a target-base digest
+  marked `b=b`, or a body-base digest marked `b=t`, no longer verifies on
+  `workflow_webhook`. An absent marker behaves exactly as before.
+
+### Fixed
+
+- **`secretIndex` indexes the array you passed.** Empty strings were filtered
+  out first, so `secret: ['', s]` verifying with `s` reported `0`, not `1`.
+- **`toleranceSeconds: NaN` refuses.** `drift > NaN` is false, so a tolerance
+  read with `parseInt` from an unset environment variable switched the
+  freshness check OFF and accepted a request signed a year ago. `Infinity`
+  still disables it, as documented.
+- **A timestamp past `Number.MAX_SAFE_INTEGER` is `malformed_timestamp`.**
+  It was read as an imprecise float and refused as
+  `timestamp_outside_tolerance`; the seven other SDKs cannot hold it at all,
+  so this is the reason all eight now agree on.
+
+### Added
+
+- A cross-SDK corpus of 61 signature vectors, which every backend SDK runs
+  through its own verifier. Not shipped in the package.
+
 ## 0.6.0 — 2026-10-15
 
 ### Added

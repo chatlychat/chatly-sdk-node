@@ -200,14 +200,16 @@ function fail(
 }
 
 /**
- * Parse a `t=…,v1=…` value, collecting EVERY `v1`.
+ * Parse a `t=…,v1=…[,b=…]` value, collecting EVERY `v1`.
  *
  * Tolerates spaces and extra fields — a future `v3` field must not break a
  * `v1` verifier, which is the whole point of the prefix — and keeps the
- * FIRST `t`, so a crafted second `t` cannot move the window.
+ * FIRST `t` and the FIRST `b`, so a crafted second one cannot move the
+ * window or the base.
  */
-function parseTv1(raw: string): { t: string; v1: string[] } | null {
+function parseTv1(raw: string): { t: string; v1: string[]; b: string | undefined } | null {
   let t: string | undefined;
+  let b: string | undefined;
   const v1: string[] = [];
   for (const part of raw.split(',')) {
     const eq = part.indexOf('=');
@@ -218,6 +220,8 @@ function parseTv1(raw: string): { t: string; v1: string[] } | null {
     const value = part.slice(eq + 1).trim();
     if (key === 't') {
       t ??= value;
+    } else if (key === 'b') {
+      b ??= value;
     } else if (key === 'v1') {
       v1.push(value);
     }
@@ -225,7 +229,7 @@ function parseTv1(raw: string): { t: string; v1: string[] } | null {
   if (t === undefined || v1.length === 0) {
     return null;
   }
-  return { t, v1 };
+  return { t, v1, b };
 }
 
 /**
@@ -236,10 +240,13 @@ function parseTv1(raw: string): { t: string; v1: string[] } | null {
  * has to come back as `missing_secret` rather than a `TypeError` out of
  * somebody's webhook handler.
  */
-function secretsFrom(secret: string | readonly string[]): string[] {
+function secretsFrom(secret: string | readonly string[]): { value: string; index: number }[] {
   const list: readonly unknown[] =
     typeof secret === 'string' ? [secret] : Array.isArray(secret) ? (secret as unknown[]) : [];
-  return list.filter((s): s is string => typeof s === 'string' && s.length > 0);
+  // The CALLER's index survives the filter (`['', s]` reported 0).
+  return list.flatMap((value, index) =>
+    typeof value === 'string' && value.length > 0 ? [{ value, index }] : [],
+  );
 }
 
 function hasTarget(input: VerifyChatlySignatureInput): boolean {
@@ -314,15 +321,53 @@ function applyV2Policy(input: VerifyChatlySignatureInput): VerifyChatlySignature
 }
 
 /**
- * Which strings the MAC may have been taken over, most specific first.
+ * Which strings the MAC may have been taken over, most specific first — or a
+ * refusal when the value's base marker rules every candidate out.
  *
  * More than one only on `workflow_webhook`, which sent the v2 header before
  * the base gained the method and path — see `signature-table.ts`.
+ *
+ * ── The marker ───────────────────────────────────────────────────────────
+ *
+ * `marker` is the `b=` field of an `x-chatly-signature-v2` value: `t` for
+ * `<t>.<METHOD>.<path>.<rawBody>`, `b` for `<t>.<rawBody>`. It is read ONLY
+ * off that header (`fromV2`) — no legacy header carries one — and it NARROWS
+ * the candidates; it never widens them past what the surface and the `v2`
+ * policy allow, because a marker is something anyone on the wire can write.
+ * An ABSENT or unrecognised marker changes nothing: every v2 value minted
+ * before the marker existed is absent, and the behaviour they verified under
+ * is the behaviour they keep.
+ *
+ * What it buys is the error: when the workflow sender moves to `b=t`, a
+ * receiver passing no method/path gets `missing_request_target`, not a mismatch.
  */
-function candidateBases(input: VerifyChatlySignatureInput): ChatlySignatureBase[] {
-  const spec = CHATLY_SIGNATURE_SURFACES[input.surface];
+function candidateBases(
+  input: VerifyChatlySignatureInput,
+  marker: string | undefined,
+): ChatlySignatureBase[] | VerifyChatlySignatureResult {
+  const { surface } = input;
+  const spec = CHATLY_SIGNATURE_SURFACES[surface];
   const policy = input.v2 ?? 'prefer';
-  if (spec.alsoAcceptsTargetBase !== true || policy === 'ignore' || !hasTarget(input)) {
+  const fromV2 = spec.signatureHeader === CHATLY_V2_SIGNATURE_HEADER;
+  if (fromV2 && marker === 'b' && (spec.base === 'target' || policy === 'require')) {
+    return fail(
+      surface,
+      'signature_mismatch',
+      `This ${CHATLY_V2_SIGNATURE_HEADER} is marked b=b: it was signed over <t>.<rawBody>, the ` +
+        "workflow action's pre-unified base. " +
+        (surface === 'unified_v2'
+          ? 'unified_v2 accepts only b=t. Verify it with surface "workflow_webhook", which ' +
+            'accepts both.'
+          : 'v2: "require" accepts only the unified base (b=t).'),
+    );
+  }
+  if (spec.alsoAcceptsTargetBase !== true || policy === 'ignore') {
+    return [spec.base];
+  }
+  if (marker === 't') {
+    return ['target'];
+  }
+  if (marker === 'b' || !hasTarget(input)) {
     return [spec.base];
   }
   // `require` on this surface means the unified base and nothing else.
@@ -432,6 +477,7 @@ export function verifyChatlySignature(
 
   let digestsHex: string[];
   let rawTimestamp: string | null = null;
+  let marker: string | undefined;
   if (spec.format === 'tv1') {
     const parsed = parseTv1(rawSignature);
     if (parsed === null) {
@@ -444,6 +490,7 @@ export function verifyChatlySignature(
     }
     digestsHex = parsed.v1;
     rawTimestamp = parsed.t;
+    marker = parsed.b;
   } else {
     if (!rawSignature.startsWith('sha256=')) {
       return fail(
@@ -506,11 +553,11 @@ export function verifyChatlySignature(
       );
     }
     const asNumber = Number(rawTimestamp);
-    if (!Number.isFinite(asNumber)) {
+    if (!Number.isSafeInteger(asNumber)) {
       return fail(
         surface,
         'malformed_timestamp',
-        `The timestamp on ${surface} is not a finite number: "${preview(rawTimestamp)}".`,
+        `The timestamp on ${surface} is too large to be one: "${preview(rawTimestamp)}".`,
       );
     }
     timestampMs = spec.unit === 'seconds' ? asNumber * 1000 : asNumber;
@@ -519,12 +566,12 @@ export function verifyChatlySignature(
     const nowMs = input.nowMs ?? Date.now();
     const signedMs = timestampMs;
     const driftMs = Math.abs(nowMs - signedMs);
-    if (driftMs > toleranceSeconds * 1000) {
+    if (!(driftMs <= toleranceSeconds * 1000)) {
       /*
-       * Both directions are refused, and the message says which. A stale
-       * timestamp is a replay or a slow queue; a FAR-FUTURE one is a sender
-       * clock or — far more often — the wrong unit, which lands roughly
-       * 54,000 years out in one direction or 54 years in the other and reads
+       * `!(<=)`: a NaN tolerance (`parseInt` of an unset env) REFUSES. Both
+       * directions are refused. A stale timestamp is a replay or a slow queue;
+       * a FAR-FUTURE one is a sender clock or — more often — the wrong unit,
+       * which lands roughly 54,000 years out one way or 54 the other and reads
        * as "expired" unless something says so.
        */
       const driftYears = driftMs / (1000 * 60 * 60 * 24 * 365);
@@ -544,7 +591,10 @@ export function verifyChatlySignature(
   }
 
   // ── The base string, and the compare ────────────────────────────────────
-  const bases = candidateBases(input);
+  const bases = candidateBases(input, marker);
+  if (!Array.isArray(bases)) {
+    return bases;
+  }
   if (bases.includes('target') && !hasTarget(input)) {
     return fail(
       surface,
@@ -561,8 +611,8 @@ export function verifyChatlySignature(
 
   for (const base of bases) {
     const prefix = baseStringPrefix(base, rawTimestamp, input);
-    for (let i = 0; i < secrets.length; i += 1) {
-      const hmac = createHmac('sha256', secrets[i] ?? '');
+    for (const { value: secret, index } of secrets) {
+      const hmac = createHmac('sha256', secret);
       if (prefix.length > 0) {
         hmac.update(prefix);
       }
@@ -573,7 +623,7 @@ export function verifyChatlySignature(
         // verifier that throws is an accepted webhook in a handler that
         // forgot try/catch.
         if (candidate.length === expected.length && timingSafeEqual(candidate, expected)) {
-          return { ok: true, surface, timestampMs, base, secretIndex: i };
+          return { ok: true, surface, timestampMs, base, secretIndex: index };
         }
       }
     }
