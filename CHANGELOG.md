@@ -1,6 +1,18 @@
 # @chatlychat/sdk-node
 
-## Unreleased
+## 0.7.0 — 2026-10-16
+
+Everything below was written before 0.6.0 shipped and then sat unreleased, so
+`0.6.0` on npm fails **6 of the 61 published signature vectors** while the
+same version in the repository passes all 61. An integrator checking our own
+corpus against our own package found it (Crossly round 8). The fix is this
+release; nothing in the code changed to make it.
+
+A **minor** bump and not a patch, deliberately: four of these change the
+`reason` a refusal reports, one changes `secretIndex`, and the base-marker
+work refuses a signature that 0.6.0 accepted. Any caller branching on `reason`
+sees different strings, which is a behaviour change even though every change
+is in the stricter, more correct direction.
 
 ### Changed
 
