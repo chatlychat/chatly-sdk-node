@@ -51,7 +51,7 @@
  * and to name the cause of a refusal; it never widens what a surface
  * accepts, since anyone on the wire can write a marker.
  *
- * ── Who sends `x-chatly-signature-v2` (2026-10-15) ───────────────────────
+ * ── Who sends `x-chatly-signature-v2` (2026-10-16) ───────────────────────
  *
  *   | surface            | v2 sent? | marker |
  *   | ------------------ | -------- | ------ |
@@ -59,13 +59,25 @@
  *   | `event_webhook`    | yes      | `b=t`  |
  *   | `customer_card`    | yes      | `b=t`  |
  *   | `canvas_step`      | yes      | `b=t`  |
+ *   | `ai_tool_call`     | yes      | `b=t`  |
  *   | `workflow_webhook` | yes      | `b=b` — its sender has not moved yet |
- *   | `ai_tool_call`     | **no**   | —      |
  *
- * A tool call's LEGACY `x-chatly-signature` already signs the target base,
- * so its v2 value will be that same digest plus `b=t`; until the sender emits
- * it, `prefer` falls through to the legacy header and verifies the identical
- * string, so a receiver loses nothing by passing `surface: 'ai_tool_call'`.
+ * So all six senders emit it, and five of the six mark `b=t`.
+ *
+ * This table read `ai_tool_call` → **no** until 2026-10-16, with prose
+ * explaining that `prefer` would fall through to the legacy header "until the
+ * sender emits it". The sender had already moved:
+ * `packages/shared/src/ai-tools/dial.ts:134` mints the v2 header with
+ * `base: 'target'` alongside the legacy one. Nothing behaved differently —
+ * the two digests are identical for this surface, which is exactly why the
+ * drift was invisible — but a table that says a header is not sent is the
+ * kind of thing an integrator plans around. Found by a reader checking this
+ * docblock against the call sites rather than trusting it (Crossly round 8).
+ *
+ * A tool call's LEGACY `x-chatly-signature` signs the same target base, so
+ * its v2 value is that same digest plus `b=t`. A receiver therefore loses
+ * nothing either way, and `surface: 'unified_v2'` with `method` and `path` is
+ * the one path worth documenting.
  *
  * ── One documented path: `unified_v2`, not a surface per sender ──────────
  *

@@ -66,6 +66,8 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+import { callerInputProblem } from './signature-caller-input.js';
+import { capitalise, preview } from './signature-message.js';
 import {
   CHATLY_SIGNATURE_SURFACES,
   CHATLY_SIGNATURE_TOLERANCE_SECONDS,
@@ -426,6 +428,13 @@ export function verifyChatlySignature(
     );
   }
 
+  // What the CALLER handed over, checked before anything reads a signature.
+  // Four shapes used to throw out of here — see `signature-caller-input.ts`.
+  const callerProblem = callerInputProblem(input);
+  if (callerProblem !== null) {
+    return fail(surface, callerProblem.reason, callerProblem.message);
+  }
+
   const secrets = secretsFrom(input.secret);
   if (secrets.length === 0) {
     return fail(
@@ -637,13 +646,4 @@ export function verifyChatlySignature(
       `secret from a different surface, or the wrong surface — ${spec.describe}.` +
       (secrets.length > 1 ? ` None of the ${String(secrets.length)} secrets matched.` : ''),
   );
-}
-
-function capitalise(value: string): string {
-  return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`;
-}
-
-/** Clip an untrusted header value so an error message stays one line. */
-function preview(value: string): string {
-  return value.length > 48 ? `${value.slice(0, 47)}…` : value;
 }
