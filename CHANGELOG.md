@@ -1,5 +1,67 @@
 # @chatlychat/sdk-node
 
+## 0.7.4 — 2026-10-25
+
+Docs-source `provider` accepts the five native connectors: `notion`, `confluence`, `zendesk`, `intercom` and `github`.
+
+## 0.7.3 — 2026-10-25
+
+A **patch** bump with NO surface change: `signatures.ts` was 649 lines
+against this repo's 650-line ceiling and was split. `surface.lock.json` is
+untouched, every exported name still resolves from `./signatures.js`, and
+`index.ts` is byte-identical — a consumer cannot tell.
+
+### Changed
+
+- **`signatures.ts` split into three files** — `signature-verify-types.ts`
+  (the verification input/result types) and `signature-parse.ts` (header
+  parsing), both re-exported from `signatures.ts` so no import path moved.
+  Verified no relative import escapes the published file set, which
+  typechecks and passes every test and then breaks at install.
+
+- `applyV2Policy` and `candidateBases` deliberately **stayed**. They are the
+  larger seam and moving them is not available: `applyV2Policy` recurses into
+  `verifyChatlySignature`, so extracting it means either a circular import in
+  a published package or a signature change — and a signature change is not a
+  patch.
+
+## 0.7.1 — 2026-10-17
+
+A **patch** bump: two optional fields on one input interface. Nothing an
+existing caller passes changes meaning, no request shape changes, and no
+route was added, so `surface.lock.json` is untouched.
+
+### Added
+
+- **`CreateDocsSourceInput.defaultLocale`.** The language every page in a
+  documentation source is written in, unless the page declares one itself.
+  `POST /v1/docs-sources` and `PATCH /v1/docs-sources/{id}` have accepted it
+  since 2026-10-16 and this interface omitted it, so a TypeScript caller
+  could only reach it through `update`'s untyped body. It is accepted for
+  every provider — unlike `includePaths`, which is a 400 on three of the five
+  — because it is the only answer for a provider that declares no language at
+  all (ReadMe) and for a documentation site whose template omits `lang`.
+
+  A BCP-47 tag (`es`, `pt-BR`, `zh-Hant`), refused with a 400 rather than
+  truncated, and normalised server-side, so `pt-br` is stored and echoed back
+  as `pt-BR`. On `update`, `null` clears it. `update`'s body stays
+  `Unmodelled`, as it is for every other field of that route.
+
+- **`CreateDocsSourceInput.forceLocale`.** The language every page is written
+  in EVEN IF the page declares another. Shipped server-side on 2026-10-17 for
+  the case `defaultLocale` cannot reach: a CMS that stamps `lang="en"` on
+  every page of a translation, where the pages are not silent and editing each
+  article by hand is undone by the next sync.
+
+  **The asymmetry matters more than the field.** `defaultLocale` loses to a
+  page's declaration, so a mistake in it can never relabel an article that was
+  already correct. `forceLocale` wins, so a mistake labels EVERY article in the
+  source with a language its readers are not asking for — hiding all of them.
+  They are two separate fields rather than one with a flag for exactly that
+  reason: the safe one must not be reachable into the dangerous one by
+  accident. Same tag rules, and `null` on `update` clears it and restores
+  believing the page.
+
 ## 0.7.0 — 2026-10-16
 
 Everything below was written before 0.6.0 shipped and then sat unreleased, so

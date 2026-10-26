@@ -5,6 +5,15 @@
  * `signature-table.ts`, and this module re-exports it, so one import of
  * `./signatures.js` still gets everything.
  *
+ * Five more siblings came out of this file for the same 650-line ceiling, and
+ * each is named for what it owns: `signature-verify-types.ts` (the published
+ * input/result contract that the seven other backend SDKs are ported from),
+ * `signature-parse.ts` (header, `t=…,v1=…` and secret parsing — it never
+ * throws and never decides), `signature-caller-input.ts` (what the caller got
+ * wrong), `signature-message.ts` (refusal text) and `signature-mint.ts` (the
+ * other direction). Every name they define that was public here is still
+ * re-exported here.
+ *
  * ═══ WHY IT TAKES A `surface` ═════════════════════════════════════════════
  *
  * Because the header name does not determine the construction. Three
@@ -68,16 +77,21 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { callerInputProblem } from './signature-caller-input.js';
 import { capitalise, preview } from './signature-message.js';
+import { HEX_SHA256, headerValue, parseTv1, secretsFrom } from './signature-parse.js';
 import {
   CHATLY_SIGNATURE_SURFACES,
   CHATLY_SIGNATURE_TOLERANCE_SECONDS,
   CHATLY_V2_SIGNATURE_HEADER,
   IN_SIGNATURE,
-  type ChatlyHeaders,
   type ChatlySignatureBase,
   type ChatlySignatureFailure,
   type ChatlySignatureSurface,
 } from './signature-table.js';
+
+import type {
+  VerifyChatlySignatureInput,
+  VerifyChatlySignatureResult,
+} from './signature-verify-types.js';
 
 export {
   CHATLY_SIGNATURE_SURFACES,
@@ -89,109 +103,11 @@ export {
   type ChatlySignatureSurface,
   type SurfaceSpec,
 } from './signature-table.js';
-
-/** How hard to insist on the unified v2 construction. See this file's header. */
-export type ChatlyV2Policy = 'prefer' | 'require' | 'ignore';
-
-export interface VerifyChatlySignatureInput {
-  /** Which surface this request came from. See `signature-table.ts`. */
-  readonly surface: ChatlySignatureSurface;
-  /**
-   * The EXACT bytes received, before any JSON parsing. Re-serialising parsed
-   * JSON reorders keys and changes whitespace, and the digest will not match.
-   */
-  readonly body: string | Uint8Array;
-  /** The request's headers. Looked up case-insensitively. */
-  readonly headers: ChatlyHeaders;
-  /**
-   * The secret for THIS surface, or every secret that is currently live on
-   * it. No secret verifies across two surfaces.
-   */
-  readonly secret: string | readonly string[];
-  /**
-   * Freshness window, always in SECONDS whatever unit the surface's timestamp
-   * is in. Defaults to {@link CHATLY_SIGNATURE_TOLERANCE_SECONDS}. Rejects
-   * stale AND far-future timestamps. Pass `Infinity` only when re-verifying
-   * something out of an archive.
-   */
-  readonly toleranceSeconds?: number;
-  /**
-   * The HTTP method of the request, which is inside the signed string on
-   * `unified_v2` and `ai_tool_call`. Case is normalised. Supplying it on any
-   * surface is what lets `v2: 'prefer'` pick up the v2 header when it
-   * appears.
-   */
-  readonly method?: string;
-  /**
-   * `pathname + search` of the request, which is inside the signed string on
-   * `unified_v2` and `ai_tool_call`. Never the scheme or the host — see
-   * `toolRequestPath` in `@livechat/shared/ai-tools`.
-   */
-  readonly path?: string;
-  /** How hard to insist on the v2 header. Default `'prefer'`. */
-  readonly v2?: ChatlyV2Policy;
-  /**
-   * `workflow_webhook_legacy` only, and required there.
-   *
-   * That surface signs the body with NO timestamp, so a captured request
-   * verifies forever and this function cannot bound a replay. Verifying it
-   * has to be a deliberate choice, so the default is a refusal that names
-   * `workflow_webhook` instead.
-   */
-  readonly allowUnprotectedReplay?: boolean;
-  /** Escape hatch for tests. Unix MILLISECONDS. */
-  readonly nowMs?: number;
-}
-
-export type VerifyChatlySignatureResult =
-  | {
-      readonly ok: true;
-      /**
-       * What actually verified — `'unified_v2'` when the v2 header was
-       * preferred over the surface asked for.
-       */
-      readonly surface: ChatlySignatureSurface;
-      /**
-       * When the sender says it signed, in Unix milliseconds — normalised, so
-       * a seconds surface and a milliseconds surface are comparable. `null`
-       * on `workflow_webhook_legacy`, which sends no timestamp.
-       */
-      readonly timestampMs: number | null;
-      /** Which string the matching MAC was taken over. */
-      readonly base: ChatlySignatureBase;
-      /**
-       * Index into the `secret` array that verified, or `0` for a single
-       * secret. During a rotation this is how you learn the old secret is
-       * no longer in use.
-       */
-      readonly secretIndex: number;
-    }
-  | {
-      readonly ok: false;
-      readonly surface: ChatlySignatureSurface;
-      readonly reason: ChatlySignatureFailure;
-      /** A sentence written to be printed to whoever has to fix it. */
-      readonly message: string;
-    };
-
-/** 64 lowercase-or-uppercase hex characters and nothing else. */
-const HEX_SHA256 = /^[0-9a-fA-F]{64}$/;
-
-function headerValue(headers: ChatlyHeaders, name: string): string[] {
-  const wanted = name.toLowerCase();
-  const found: string[] = [];
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() !== wanted || value === undefined) {
-      continue;
-    }
-    if (Array.isArray(value)) {
-      found.push(...value);
-    } else {
-      found.push(value);
-    }
-  }
-  return found;
-}
+export type {
+  ChatlyV2Policy,
+  VerifyChatlySignatureInput,
+  VerifyChatlySignatureResult,
+} from './signature-verify-types.js';
 
 function fail(
   surface: ChatlySignatureSurface,
@@ -199,56 +115,6 @@ function fail(
   message: string,
 ): VerifyChatlySignatureResult {
   return { ok: false, surface, reason, message };
-}
-
-/**
- * Parse a `t=…,v1=…[,b=…]` value, collecting EVERY `v1`.
- *
- * Tolerates spaces and extra fields — a future `v3` field must not break a
- * `v1` verifier, which is the whole point of the prefix — and keeps the
- * FIRST `t` and the FIRST `b`, so a crafted second one cannot move the
- * window or the base.
- */
-function parseTv1(raw: string): { t: string; v1: string[]; b: string | undefined } | null {
-  let t: string | undefined;
-  let b: string | undefined;
-  const v1: string[] = [];
-  for (const part of raw.split(',')) {
-    const eq = part.indexOf('=');
-    if (eq <= 0) {
-      continue;
-    }
-    const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-    if (key === 't') {
-      t ??= value;
-    } else if (key === 'b') {
-      b ??= value;
-    } else if (key === 'v1') {
-      v1.push(value);
-    }
-  }
-  if (t === undefined || v1.length === 0) {
-    return null;
-  }
-  return { t, v1, b };
-}
-
-/**
- * Every non-empty secret the caller handed over, in order.
- *
- * Defensive about what it is given because this function must never throw: a
- * plain-JavaScript caller passing `undefined`, or an array with a hole in it,
- * has to come back as `missing_secret` rather than a `TypeError` out of
- * somebody's webhook handler.
- */
-function secretsFrom(secret: string | readonly string[]): { value: string; index: number }[] {
-  const list: readonly unknown[] =
-    typeof secret === 'string' ? [secret] : Array.isArray(secret) ? (secret as unknown[]) : [];
-  // The CALLER's index survives the filter (`['', s]` reported 0).
-  return list.flatMap((value, index) =>
-    typeof value === 'string' && value.length > 0 ? [{ value, index }] : [],
-  );
 }
 
 function hasTarget(input: VerifyChatlySignatureInput): boolean {

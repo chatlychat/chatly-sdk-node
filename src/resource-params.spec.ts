@@ -206,6 +206,34 @@ describe('body field names that the route name gets wrong', () => {
     expect((await one((c) => c.contacts.cards('cont_1'))).body).toEqual({});
   });
 
+  /*
+   * `defaultLocale` is accepted on create for EVERY provider, unlike
+   * `includePaths`. It was omitted from `CreateDocsSourceInput` when the
+   * feature shipped, so a TypeScript caller could only reach it through
+   * `update`'s untyped body — this asserts it goes up on the create, under
+   * that exact name and at the top level of the body (not inside a `config`
+   * object, which is where it is STORED but not where it is sent).
+   */
+  it('docsSources.create sends defaultLocale at the top level of the body', async () => {
+    const req = await one((c) =>
+      c.docsSources.create({
+        provider: 'readme',
+        token: 'rdme_x',
+        organizationId: 'o_1',
+        spaceId: 's_1',
+        defaultLocale: 'pt-BR',
+      }),
+    );
+    expect(req.path).toBe('/v1/docs-sources');
+    expect(req.body).toEqual({
+      provider: 'readme',
+      token: 'rdme_x',
+      organizationId: 'o_1',
+      spaceId: 's_1',
+      defaultLocale: 'pt-BR',
+    });
+  });
+
   it('docsSources.discover sends provider/token/baseUrl flat, with no credentials wrapper', async () => {
     const req = await one((c) =>
       c.docsSources.discover({
@@ -527,5 +555,43 @@ describe('the deletes that answer with a body are not typed void', () => {
     for (const value of results) {
       expect(value).toEqual({});
     }
+  });
+});
+
+/**
+ * `forceLocale` reaches the wire, and is a different field from
+ * `defaultLocale`.
+ *
+ * The asymmetry is the point: `defaultLocale` loses to a page's declaration,
+ * `forceLocale` beats it. A client that conflated them would turn a safe
+ * setting into one that can hide every article in a source, so this asserts
+ * both travel INDEPENDENTLY rather than that either is merely accepted.
+ */
+describe('docsSources locale overrides', () => {
+  it('sends forceLocale at the top level of the create body', async () => {
+    const req = await one((c) =>
+      c.docsSources.create({
+        provider: 'website',
+        token: 't',
+        organizationId: 'o_1',
+        spaceId: 's_1',
+        forceLocale: 'es',
+      }),
+    );
+    expect(req.body).toMatchObject({ forceLocale: 'es' });
+  });
+
+  it('carries both independently, so one cannot stand in for the other', async () => {
+    const req = await one((c) =>
+      c.docsSources.create({
+        provider: 'website',
+        token: 't',
+        organizationId: 'o_1',
+        spaceId: 's_1',
+        defaultLocale: 'en',
+        forceLocale: 'es',
+      }),
+    );
+    expect(req.body).toMatchObject({ defaultLocale: 'en', forceLocale: 'es' });
   });
 });

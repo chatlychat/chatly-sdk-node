@@ -1,7 +1,17 @@
 import type { Transport, Unmodelled } from './common.js';
 
 /** `providerSchema` — the five docs providers. */
-export type DocsProvider = 'gitbook' | 'forumulate' | 'discourse' | 'readme' | 'website';
+export type DocsProvider =
+  | 'gitbook'
+  | 'forumulate'
+  | 'discourse'
+  | 'readme'
+  | 'website'
+  | 'notion'
+  | 'confluence'
+  | 'zendesk'
+  | 'intercom'
+  | 'github';
 
 export interface DiscoverDocsInput {
   provider: DocsProvider;
@@ -31,6 +41,49 @@ export interface CreateDocsSourceInput {
   /** Forumulate and sitemap-read sites only; a 400 for the other providers. */
   includePaths?: ReadonlyArray<string>;
   excludePaths?: ReadonlyArray<string>;
+  /**
+   * The language every page in this source is written in, unless the page
+   * itself declares one. Accepted for EVERY provider, unlike the path
+   * filters above — it is the only answer for the ones that declare nothing
+   * (ReadMe's API has no language concept at all) and for a documentation
+   * site whose template omits `lang`.
+   *
+   * A BCP-47 tag — `es`, `pt-BR`, `zh-Hant`. **Refused with a 400 rather
+   * than truncated or ignored** if it is not one, because the value reaches
+   * `kb_articles.locale`, a help-centre URL path and an `<html lang>`
+   * attribute. Casing is normalised server-side, so `pt-br` is stored and
+   * echoed back as `pt-BR`.
+   *
+   * It LOSES to a language the page declares, so setting it can never
+   * relabel a page whose language was already known. To split a space that
+   * publishes two languages, connect it twice with `includePaths` and give
+   * each source its own tag.
+   *
+   * On `update` it is the same field plus a third state: `null` CLEARS it
+   * (RFC 7396 merge), which restores silence — the next sync writes no
+   * language and every stored value stands. `update`'s body is `Unmodelled`,
+   * as it is for every other field, so that is not a separate type here.
+   */
+  defaultLocale?: string;
+  /**
+   * The language every page is written in EVEN IF the page declares another.
+   *
+   * Use this only when the pages are genuinely wrong — the case it exists for
+   * is a CMS that stamps `lang="en"` on every page of a translation, where
+   * `defaultLocale` cannot help because the pages are not silent.
+   *
+   * **The asymmetry matters more than the feature.** `defaultLocale` loses to
+   * a page's declaration, so a mistake in it can never relabel an article
+   * that was already correct. This one wins, so a mistake labels EVERY
+   * article in the source with a language its readers are not asking for,
+   * which hides all of them. Two separate fields rather than one with a flag,
+   * deliberately: the safe one must not be reachable into the dangerous one
+   * by accident.
+   *
+   * Same tag rules and the same `null`-clears behaviour on `update`. Clearing
+   * restores believing the page, and the next sync relabels everything back.
+   */
+  forceLocale?: string;
 }
 
 export function docsSourcesResource(t: Transport) {
