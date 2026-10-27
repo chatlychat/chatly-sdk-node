@@ -1,6 +1,6 @@
 {
   "name": "@chatlychat/sdk-node",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "Official Node.js SDK for the Chatly API — typed REST client, webhook signature verification, and the widget identity hash.",
   "license": "MIT",
   "homepage": "https://github.com/chatlychat/chatly-sdk-node#readme",
@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "@typescript/native-preview": "^7.0.0-dev.20251023.1",
     "typescript": "^5.6.2",
     "vitest": "^2.1.2"
   }

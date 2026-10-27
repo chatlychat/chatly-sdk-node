@@ -32,8 +32,13 @@ endpoint in production:
 const { workspaceId, scopes } = await chatly.whoami();
 ```
 
-It is the only api-keys route a key may call: minting or listing keys with a
-key would let a leaked read-only key escalate itself.
+Seven of the api-keys routes accept a key, minting among them since
+2026-10-26: `create` refuses any scope the calling key does not hold itself,
+so a leaked read-only key cannot escalate. Only
+`PUT /v1/api-keys/:id/machine-user` stays closed to keys. The ones with no
+typed method here are reachable through `request()`, which takes `headers` —
+that is how you send `x-secret-recipient` to have a new key's secret sealed
+to a public key instead of returned in plaintext.
 
 ## What the client can do
 

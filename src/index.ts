@@ -260,11 +260,18 @@ export class ChatlyClient {
    * Describe the credential this client is using: which workspace it belongs
    * to and which scopes it was granted.
    *
-   * `GET /v1/api-keys/whoami` is one of two routes on the api-keys
-   * controller that accepts an API key (managing keys with a key is a
-   * privilege-escalation shape). It is the call to make first: it turns a
+   * `GET /v1/api-keys/whoami` is the call to make first: it turns a
    * mis-scoped key into an obvious error at integration time rather than a
    * 403 from an unrelated endpoint later.
+   *
+   * This used to say it was "one of two routes on the api-keys controller
+   * that accepts an API key (managing keys with a key is a
+   * privilege-escalation shape)". Both halves are now wrong: seven of that
+   * controller's handlers accept a key — list, revoke, revoke-self, rotate,
+   * scopes, whoami and, since 2026-10-26, `POST /v1/api-keys` itself — and
+   * minting is bounded by `ungrantablePermissions`, which refuses any scope
+   * the calling key does not hold. Only `PUT :id/machine-user` stays shut.
+   * Reach the untyped ones through `request()`.
    *
    * It was reachable over raw HTTP but appeared in no SDK and no doc, so
    * there was no way for an integrator to discover it.
@@ -303,8 +310,8 @@ export class ChatlyClient {
   public async request<T>(
     method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
     path: string,
-    options: { query?: Query; body?: unknown } = {},
+    options: { query?: Query; body?: unknown; headers?: Readonly<Record<string, string>> } = {},
   ): Promise<T> {
-    return this.transport.send<T>(method, path, options.query ?? {}, options.body);
+    return this.transport.send<T>(method, path, options.query ?? {}, options.body, options.headers);
   }
 }

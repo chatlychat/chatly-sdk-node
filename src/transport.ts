@@ -14,7 +14,7 @@ import {
 export const DEFAULT_API_URL = 'https://api.chatlychat.com';
 
 /** The package version, stamped into `User-Agent` so our logs can see SDK age. */
-export const SDK_VERSION = '0.7.4';
+export const SDK_VERSION = '0.8.0';
 
 export interface RetryPolicy {
   /** Total attempts, including the first. `1` disables retrying. */
@@ -134,6 +134,20 @@ export class Transport {
     path: string,
     query: Query = {},
     body?: unknown,
+    /**
+     * Extra request headers, for the routes whose behaviour is chosen by one.
+     *
+     * There is exactly one today and it is the reason this exists:
+     * `x-secret-recipient` on `POST /v1/api-keys`, which makes the response
+     * carry a blob sealed to the recipient's X25519 key instead of a
+     * plaintext token. Without a way to send it, the sealed path could only
+     * be driven from a browser — so the safest way to deliver a credential
+     * was the one thing no script could do.
+     *
+     * `authorization` and `idempotency-key` cannot be set through this; see
+     * `attempt`.
+     */
+    extraHeaders?: Readonly<Record<string, string>>,
   ): Promise<T> {
     const url = new URL(`${this.base}${path}`);
     for (const [key, value] of Object.entries(query)) {
@@ -166,7 +180,7 @@ export class Transport {
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.retry.attempts; attempt++) {
       try {
-        return await this.attempt<T>(url, method, body, idempotencyKey);
+        return await this.attempt<T>(url, method, body, idempotencyKey, extraHeaders);
       } catch (err) {
         lastError = err;
         const retryable =
@@ -195,11 +209,26 @@ export class Transport {
     method: string,
     body: unknown,
     idempotencyKey: string | null,
+    extraHeaders?: Readonly<Record<string, string>>,
   ): Promise<T> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
     try {
       const headers = new Headers(this.headers);
+      /*
+       * Before the idempotency key, and skipping `authorization`. The two
+       * guards are different and only one of them is this condition: a
+       * caller cannot replace the bearer token because the condition refuses
+       * it, and cannot replace the idempotency key because the block below
+       * runs AFTER this loop and overwrites whatever was set. If that order
+       * ever changes, the second guard disappears silently — which is why it
+       * is written down rather than left to be noticed.
+       */
+      for (const [name, value] of Object.entries(extraHeaders ?? {})) {
+        if (name.toLowerCase() !== 'authorization') {
+          headers.set(name, value);
+        }
+      }
       if (idempotencyKey !== null) {
         headers.set('idempotency-key', idempotencyKey);
       }

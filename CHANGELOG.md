@@ -1,5 +1,10 @@
 # @chatlychat/sdk-node
 
+## 0.8.0 — 2026-10-26
+
+- **`request()` takes `headers`.** A few operations are steered by a request header rather than by the body, and there was no way to send one. The one that mattered: `x-secret-recipient` on `POST /v1/api-keys`, which makes the response carry a secret sealed to an X25519 public key instead of a plaintext token. Nothing in any published package could send it, so the sealed path — the safest way to deliver a credential — could only be driven from a browser. `authorization` and `idempotency-key` cannot be set this way; the client owns both.
+- **`POST /v1/api-keys` now accepts a `ck_` key**, so minting is reachable from this SDK at all. The calling key needs `workspace:write` and every scope it is conferring: `create` refuses any scope the caller does not hold itself. `whoami()`'s docblock claiming it was "one of two routes on the api-keys controller that accepts an API key" has been corrected — seven accept one.
+
 ## 0.7.4 — 2026-10-25
 
 Docs-source `provider` accepts the five native connectors: `notion`, `confluence`, `zendesk`, `intercom` and `github`.
