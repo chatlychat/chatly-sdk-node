@@ -445,16 +445,24 @@ describe('visitors.startConversation surfaces the opt-in and the per-contact lim
    *   - `consumePerContactOutreachToken` throws `RateLimitedError(ttl)`;
    *   - that is an `AppError` whose `toJSON()` puts the TTL in
    *     `details.retryAfterSeconds`, which `app-exception.filter.ts` nests
-   *     under `error` — and that filter sets no headers at all;
+   *     under `error`. That filter set no headers at all when this was
+   *     written; it now derives a plain `Retry-After` from
+   *     `details.retryAfterSeconds` on a 429 (and on the 503 it answers for a
+   *     Postgres capacity error) — see `app-exception.filter.spec.ts`. So the
+   *     gap below is CLOSED on this route and this test keeps its fixture
+   *     deliberately header-less, to cover a deployment that predates it;
    *   - the one place a plain `Retry-After` is synthesised
    *     (`apps/api/src/main.ts`) reads the `Retry-After-{bucket}` headers
    *     `@nestjs/throttler` emits, and this refusal is not a throttler
    *     refusal, so there are none and nothing is synthesised.
    *
-   * So `retryAfter` is null here and the advice is in the body, which no SDK
-   * reads. That is a real gap, logged rather than papered over: a test that
-   * asserted the header would have made this file agree with a claim the
-   * server does not make.
+   * So `retryAfter` is null for THIS fixture and the advice is only in the
+   * body, which no SDK reads. It was a real gap when written and is closed on
+   * the server; the test stays as it is because the SDK behaviour it pins —
+   * null advice means fall back to jittered backoff — is what any older
+   * deployment still produces. The original version served
+   * `retry-after: 1800` and asserted `retryAfter: 1800` against a server that
+   * sent no such header, which is the trap, not this.
    */
   it('answers the per-contact limit with a rate-limit error whose retryAfter is NULL', async () => {
     const body = JSON.stringify({
@@ -511,7 +519,7 @@ describe('visitors.startConversation surfaces the opt-in and the per-contact lim
         headers: {
           'content-type': 'application/json',
           'retry-after-short': '1',
-          'retry-after-login': '42',
+          'retry-after-sustained': '42',
         },
       })) as unknown as typeof fetch;
     const chatly = new ChatlyClient({

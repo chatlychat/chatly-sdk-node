@@ -1,5 +1,11 @@
 # @chatlychat/sdk-node
 
+## 0.9.0 — 2026-11-06
+
+- **A long `Retry-After` is no longer slept through.** `RetryPolicy.maxDelayMs` is documented as "ceiling for a single backoff" and the server-advised path ignored it — `sleepFn(advised ?? jittered)` waited for whatever number the server sent. An integrator was sent `retry-after: 809` and their tooling went silent for the thirteen minutes that followed, which is indistinguishable from a hang. Advice above `MAX_ADVISED_DELAY_MS` (30 seconds, exported) is now handed back as the `ChatlyRateLimitError` it came from, carrying `retryAfter`, so the caller decides. Shorter advice is still waited out, because a 429 advising 5 seconds is worth waiting for and capping it at the 4-second backoff ceiling would turn those into failures.
+- **New `onRetry` option.** Called with a `RetryNotice` (`attempt`, `attempts`, `status`, `delayMs`, `retryAfterSeconds`, `method`, `path`) before every retry wait, so a CLI or a job can say why it went quiet. A long sleep with no output is the same thing as a hang to whoever is watching.
+- **Rate-limit header note.** The API's `login` bucket is now called `sustained` and is counted per credential rather than per IP. This SDK reads the plain `Retry-After`, so nothing here changed for it — but if you read `x-ratelimit-*-login` off a `request()` response yourself, the suffix moved.
+
 ## 0.8.0 — 2026-10-26
 
 - **`request()` takes `headers`.** A few operations are steered by a request header rather than by the body, and there was no way to send one. The one that mattered: `x-secret-recipient` on `POST /v1/api-keys`, which makes the response carry a secret sealed to an X25519 public key instead of a plaintext token. Nothing in any published package could send it, so the sealed path — the safest way to deliver a credential — could only be driven from a browser. `authorization` and `idempotency-key` cannot be set this way; the client owns both.

@@ -54,8 +54,10 @@ export {
 export {
   DEFAULT_API_URL,
   DEFAULT_RETRY,
+  MAX_ADVISED_DELAY_MS,
   SDK_VERSION,
   type Query,
+  type RetryNotice,
   type RetryPolicy,
 } from './transport.js';
 export { autoPaginate, type Page, type PageQuery } from './pagination.js';

@@ -14,7 +14,7 @@ import {
 export const DEFAULT_API_URL = 'https://api.chatlychat.com';
 
 /** The package version, stamped into `User-Agent` so our logs can see SDK age. */
-export const SDK_VERSION = '0.8.0';
+export const SDK_VERSION = '0.9.0';
 
 export interface RetryPolicy {
   /** Total attempts, including the first. `1` disables retrying. */
@@ -27,6 +27,38 @@ export interface RetryPolicy {
 
 export const DEFAULT_RETRY: RetryPolicy = { attempts: 3, baseDelayMs: 250, maxDelayMs: 4_000 };
 
+/**
+ * The longest the transport will sleep on the SERVER's `Retry-After`, as
+ * opposed to its own backoff.
+ *
+ * `maxDelayMs` is documented as "ceiling for a single backoff" and the advised
+ * path ignored it: `await this.sleepFn(advised ?? jittered)` slept for whatever
+ * number the server sent. ForgeDeck's fifth report (2026-11-06, item 2) hit a
+ * `retry-after: 809` — a THIRTEEN MINUTE sleep with no output, which is
+ * indistinguishable from a hang, and their `plan`/`apply` looked dead.
+ *
+ * Longer than `maxDelayMs` on purpose: a 429 that advises 5 seconds is worth
+ * waiting out, and capping the advised path at the 4s backoff ceiling would
+ * turn those into failures. Past this, the honest answer is to hand the caller
+ * the error — which carries `retryAfter` — and let it decide, rather than to
+ * sleep where no progress is possible.
+ */
+export const MAX_ADVISED_DELAY_MS = 30_000;
+
+/** Handed to `onRetry` before each wait, so a CLI can say why it went quiet. */
+export interface RetryNotice {
+  /** The attempt that just failed, 1-based. */
+  readonly attempt: number;
+  readonly attempts: number;
+  readonly status: number | null;
+  /** What we are about to sleep, in milliseconds. */
+  readonly delayMs: number;
+  /** The server's own advice in seconds, when it sent any. */
+  readonly retryAfterSeconds: number | null;
+  readonly method: string;
+  readonly path: string;
+}
+
 export interface TransportOptions {
   readonly apiKey: string;
   readonly apiUrl?: string;
@@ -35,6 +67,11 @@ export interface TransportOptions {
   readonly retry?: Partial<RetryPolicy>;
   /** Test seam. Defaults to a real timer; a test passes a no-op. */
   readonly sleepFn?: (ms: number) => Promise<void>;
+  /**
+   * Called before every retry wait. A long sleep with no output is the same
+   * thing as a hang to whoever is watching; this is how a caller says so.
+   */
+  readonly onRetry?: (notice: RetryNotice) => void;
 }
 
 export type Query = Record<string, string | number | boolean | undefined | ReadonlyArray<string>>;
@@ -53,6 +90,7 @@ export class Transport {
   private readonly fetchFn: typeof fetch;
   private readonly retry: RetryPolicy;
   private readonly sleepFn: (ms: number) => Promise<void>;
+  private readonly onRetry: ((notice: RetryNotice) => void) | undefined;
   /**
    * When set, every write uses this exact `Idempotency-Key` instead of a fresh
    * UUID. Set by `ChatlyClient.withIdempotencyKey`, which returns a client
@@ -86,6 +124,7 @@ export class Transport {
     this.fetchFn = opts.fetchFn ?? globalThis.fetch;
     this.retry = { ...DEFAULT_RETRY, ...opts.retry };
     this.sleepFn = opts.sleepFn ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.onRetry = opts.onRetry;
     this.pinnedIdempotencyKey = pinnedIdempotencyKey;
   }
 
@@ -190,15 +229,36 @@ export class Transport {
         if (!retryable || attempt === this.retry.attempts) {
           throw err;
         }
-        const advised =
-          err instanceof ChatlyApiError && err.retryAfter !== null ? err.retryAfter * 1000 : null;
+        const advisedSeconds =
+          err instanceof ChatlyApiError && err.retryAfter !== null ? err.retryAfter : null;
+        const advised = advisedSeconds === null ? null : advisedSeconds * 1000;
+        /*
+         * Advice we will not act on is handed back, not slept through. A
+         * `retry-after` in the hundreds of seconds means the window will not
+         * roll within any sane wait, so sleeping is not progress — it is a
+         * hang that the caller cannot see, cancel or explain. The error
+         * carries `retryAfter`, so the decision stays with whoever asked.
+         */
+        if (advised !== null && advised > MAX_ADVISED_DELAY_MS) {
+          throw err;
+        }
         const backoff = Math.min(
           this.retry.baseDelayMs * 2 ** (attempt - 1),
           this.retry.maxDelayMs,
         );
         // Jitter: a fleet of workers retrying in lockstep is a second outage.
         const jittered = backoff * (0.5 + Math.random() / 2);
-        await this.sleepFn(advised ?? jittered);
+        const delayMs = advised ?? jittered;
+        this.onRetry?.({
+          attempt,
+          attempts: this.retry.attempts,
+          status: err instanceof ChatlyApiError ? err.status : null,
+          delayMs,
+          retryAfterSeconds: advisedSeconds,
+          method,
+          path,
+        });
+        await this.sleepFn(delayMs);
       }
     }
     throw lastError;
