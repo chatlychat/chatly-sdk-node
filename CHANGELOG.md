@@ -1,5 +1,14 @@
 # @chatlychat/sdk-node
 
+## 0.10.0 — 2026-11-12
+
+A **minor** with no API change: `SDK_VERSION` is stamped into `User-Agent`, so
+the version a request reports is part of this package's surface and a patch
+bump would have had our logs attribute 0.10.0 traffic to 0.9.0.
+
+- No behaviour change. Published alongside `@chatlychat/core` 0.9.0 and
+  `@chatlychat/cli` 0.11.0 so the three agree on a version in one release.
+
 ## 0.9.0 — 2026-11-06
 
 - **A long `Retry-After` is no longer slept through.** `RetryPolicy.maxDelayMs` is documented as "ceiling for a single backoff" and the server-advised path ignored it — `sleepFn(advised ?? jittered)` waited for whatever number the server sent. An integrator was sent `retry-after: 809` and their tooling went silent for the thirteen minutes that followed, which is indistinguishable from a hang. Advice above `MAX_ADVISED_DELAY_MS` (30 seconds, exported) is now handed back as the `ChatlyRateLimitError` it came from, carrying `retryAfter`, so the caller decides. Shorter advice is still waited out, because a 429 advising 5 seconds is worth waiting for and capping it at the 4-second backoff ceiling would turn those into failures.

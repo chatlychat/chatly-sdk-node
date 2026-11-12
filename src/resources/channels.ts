@@ -1,6 +1,17 @@
 import type { Query, Transport, Unmodelled } from './common.js';
 
 /**
+ * `channels.list`'s query, minus the two keys that switch the response from
+ * a bare array to the page envelope. `never` rather than omission: omitting
+ * them from an index-signature type forbids nothing, because the index
+ * signature still admits them.
+ */
+export type ChannelListQuery = Query & {
+  readonly limit?: never;
+  readonly cursor?: never;
+};
+
+/**
  * The 17 types `POST /v1/channels` accepts.
  *
  * Narrower than what a channel RESPONSE may carry: `telegram_user` exists in
@@ -54,7 +65,28 @@ export interface UpdateChannelInput {
 
 export function channelsResource(t: Transport) {
   return {
-    list: (query: Query = {}) => t.get<ReadonlyArray<Unmodelled>>('/v1/channels', query),
+    /**
+     * `GET /v1/channels` — every channel in the workspace, as a bare JSON
+     * array.
+     *
+     * `limit` and `cursor` are refused AT COMPILE TIME, and that is the
+     * point rather than a restriction. This route has TWO response shapes:
+     * bare array by default, and the `{ items, nextCursor, hasMore }`
+     * envelope when either of those is sent (see the API's
+     * `channel-list-page.ts` for why it was made opt-in rather than
+     * breaking every shipped integrator). This method's return type says
+     * array. Forwarding an arbitrary query while promising an array made
+     * that promise a lie a caller could trigger by typing `{ limit: 50 }`
+     * — the same class as the Rust client's `Page` decoder reading a bare
+     * array as an EMPTY page and answering 200, which is recorded in
+     * `surface.json` as the reason response shapes are audited at all.
+     *
+     * A caller who genuinely wants the page envelope asks for it through
+     * `request()`, the documented escape hatch for surface the typed
+     * methods do not model.
+     */
+    list: (query: ChannelListQuery = {}) =>
+      t.get<ReadonlyArray<Unmodelled>>('/v1/channels', query),
     get: (id: string) => t.get<Unmodelled>(`/v1/channels/${encodeURIComponent(id)}`),
     /**
      * Channel types this deployment can receive on.

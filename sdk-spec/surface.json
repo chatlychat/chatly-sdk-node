@@ -337,7 +337,8 @@
       "name": "list",
       "http": "GET",
       "path": "/v1/channels",
-      "shape": "array"
+      "shape": "array",
+      "$note": "TWO SHAPES, and `shape` records only the default. Send neither `limit` nor `cursor` and the body is the bare array this row pins. Send EITHER and the API answers the `page` envelope instead — the opt-in cursor added for an integrator who asked for it, argued in the API's `channel-list-page.ts`, which chose opt-in over breaking every shipped client. This row stays `array` because that is what an SDK calling the route the way these locks call it receives; the note exists because `shape` alone cannot say 'conditional' and a reader who trusted it would build a decoder that is wrong half the time. An SDK must NOT forward a caller-supplied `limit`/`cursor` to this route while promising an array: sdk-node forbids both keys at compile time, and sdk-rust returns an untyped Value and says so. Anyone who wants the envelope uses `request()`. This route also still has no `list_all`: auto-pagination is deliberately withheld, which is pinned by sdk-node's surface-lock spec."
     },
     {
       "ns": "channels",
